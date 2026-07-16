@@ -1,0 +1,45 @@
+<?php
+
+return [
+
+    'mercadolibre' => [
+        'client_id'     => env('MERCADOLIBRE_CLIENT_ID'),
+        'client_secret' => env('MERCADOLIBRE_CLIENT_SECRET'),
+        'redirect_uri'  => env('MERCADOLIBRE_REDIRECT_URI'),
+        'api_url'       => env('MERCADOLIBRE_API_URL', 'https://api.mercadolibre.com'),
+        'auth_url'      => env('MERCADOLIBRE_AUTH_URL', 'https://auth.mercadolibre.com.co'),
+    ],
+
+    'fincaraiz' => [
+        'api_url' => env('FINCARAIZ_API_URL', 'https://kong.fincaraiz.com.co/management/api/1.0'),
+        'api_key' => env('FINCARAIZ_API_KEY'),
+    ],
+
+    'ciencuadras' => [
+        'environment' => env('CIENCUADRAS_ENV', 'production'),
+        'api_url'     => env('CIENCUADRAS_API_URL', 'https://ws-api.ciencuadras.com'),
+        'page_url'    => env('CIENCUADRAS_PAGE_URL', 'https://www.ciencuadras.com'),
+        'username'    => env('CIENCUADRAS_USERNAME', env('CIENCUADRAS_EMAIL')),
+        'email'       => env('CIENCUADRAS_EMAIL'),
+        'password'    => env('CIENCUADRAS_PASSWORD'),
+        'integrator'  => env('CIENCUADRAS_INTEGRATOR', 'SUCASA'),
+        'property_code_prefix' => env('CIENCUADRAS_PROPERTY_CODE_PREFIX', '22130-'),
+        'default_city_id' => env('CIENCUADRAS_DEFAULT_CITY_ID'),
+        'default_locality_id' => env('CIENCUADRAS_DEFAULT_LOCALITY_ID'),
+        'auto_sync' => env('CIENCUADRAS_AUTO_SYNC', false),
+        'auto_sync_limit' => env('CIENCUADRAS_AUTO_SYNC_LIMIT', 20),
+        'auto_sync_scan' => env('CIENCUADRAS_AUTO_SYNC_SCAN', 500),
+    ],
+
+    'proppit' => [
+        'feed_path'  => env('PROPPIT_FEED_PATH', 'storage/app/proppit/feed.xml'),
+        'public_url' => env('PROPPIT_FEED_PUBLIC_URL'),
+        'api_key'    => env('PROPPIT_API_KEY'),
+    ],
+
+    'google' => [
+        'sitemap_path'  => env('GOOGLE_SITEMAP_PATH', 'storage/app/google/sitemap.xml'),
+        'public_url'    => env('GOOGLE_SITEMAP_PUBLIC_URL'),
+    ],
+
+];

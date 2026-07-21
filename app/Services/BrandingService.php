@@ -11,8 +11,8 @@ class BrandingService
     {
         return [
             'app_name' => config('app.name', 'Panel Sucasa'),
-            'logo_url' => $this->systemImage('portal_logo_url', config('sources.branding.logo_fallback')),
-            'favicon_url' => $this->systemImage('portal_favicon_url', config('sources.branding.favicon_fallback')),
+            'logo_url' => $this->systemImage('portal_logo_url'),
+            'favicon_url' => $this->systemImage('portal_favicon_url'),
             'palette' => [
                 'primary_blue' => '#1B447D',
                 'accent_orange' => '#F59120',
@@ -25,7 +25,7 @@ class BrandingService
         ];
     }
 
-    public function systemImage(string $function, string $fallback): string
+    public function systemImage(string $function): string
     {
         static $cache = [];
 
@@ -34,7 +34,7 @@ class BrandingService
         }
 
         if (config('sources.properties') !== 'wordpress') {
-            return $cache[$function] = $fallback;
+            return $cache[$function] = '';
         }
 
         try {
@@ -46,9 +46,9 @@ class BrandingService
 
             $url = trim((string) ($row->image_url ?? ''));
 
-            return $cache[$function] = $url !== '' ? $url : $fallback;
+            return $cache[$function] = $url;
         } catch (Throwable) {
-            return $cache[$function] = $fallback;
+            return $cache[$function] = '';
         }
     }
 }

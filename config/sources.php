@@ -26,8 +26,5 @@ return [
 
     'demo_data' => env('SEED_DEMO_DATA', true),
 
-    'branding' => [
-        'logo_fallback' => env('BRANDING_LOGO_FALLBACK', '/images/logo.png'),
-        'favicon_fallback' => env('BRANDING_FAVICON_FALLBACK', '/images/logo.png'),
-    ],
+    'branding' => [],
 ];

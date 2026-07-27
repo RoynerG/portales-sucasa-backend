@@ -41,7 +41,7 @@ class ProppitPropertyMapper
 
     public function referenceId(string $code): string
     {
-        return (string) config('portals.proppit.reference_prefix') . $code;
+        return trim($code);
     }
 
     protected function payload(stdClass $row, ?stdClass $consultant): array

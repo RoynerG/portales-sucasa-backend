@@ -40,7 +40,6 @@ return [
         'default_contact_name' => env('PROPPIT_DEFAULT_CONTACT_NAME', 'Su Casa Inmobiliaria'),
         'default_contact_email' => env('PROPPIT_DEFAULT_CONTACT_EMAIL'),
         'default_contact_phone' => env('PROPPIT_DEFAULT_CONTACT_PHONE'),
-        'reference_prefix' => env('PROPPIT_REFERENCE_PREFIX', 'SKC-'),
         'public_url' => env('PROPPIT_PUBLIC_URL'),
     ],
 

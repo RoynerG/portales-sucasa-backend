@@ -32,9 +32,16 @@ return [
     ],
 
     'proppit' => [
-        'feed_path'  => env('PROPPIT_FEED_PATH', 'storage/app/proppit/feed.xml'),
-        'public_url' => env('PROPPIT_FEED_PUBLIC_URL'),
-        'api_key'    => env('PROPPIT_API_KEY'),
+        'api_url' => env('PROPPIT_API_URL', 'https://real-time.proppit.com/api/v2'),
+        'country' => env('PROPPIT_COUNTRY', 'CO'),
+        'user' => env('PROPPIT_USER'),
+        'password' => env('PROPPIT_PASSWORD'),
+        'publisher_external_id' => env('PROPPIT_PUBLISHER_EXTERNAL_ID'),
+        'default_contact_name' => env('PROPPIT_DEFAULT_CONTACT_NAME', 'Su Casa Inmobiliaria'),
+        'default_contact_email' => env('PROPPIT_DEFAULT_CONTACT_EMAIL'),
+        'default_contact_phone' => env('PROPPIT_DEFAULT_CONTACT_PHONE'),
+        'reference_prefix' => env('PROPPIT_REFERENCE_PREFIX', 'SKC-'),
+        'public_url' => env('PROPPIT_PUBLIC_URL'),
     ],
 
     'google' => [

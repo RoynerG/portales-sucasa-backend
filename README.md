@@ -185,22 +185,16 @@ Si Laravel corre en otro puerto/host, copia `panel/.env.example` a `panel/.env` 
 ## Generar feeds XML
 
 ```bash
-# Proppit (Lifull Connect)
-php artisan portals:generate-feeds --portal=proppit
-
 # Google Sitemap
 php artisan portals:generate-feeds --portal=google
-
-# Ambos
-php artisan portals:generate-feeds
 ```
 
-Los archivos quedan en `backend/storage/app/proppit/feed.xml` y `backend/storage/app/google/sitemap.xml`.
-Para servirlos públicamente, crea un symlink o exponlos vía Apache/nginx.
+El archivo queda en `backend/storage/app/google/sitemap.xml`.
+Proppit ya no usa feed XML: publica, actualiza y despublica con la API real-time v2.
 
 ## Programar tareas automáticas (opcional)
 
-Para que el webhook de MercadoLibre refresque tokens o se regeneren feeds cada hora:
+Para que el webhook de MercadoLibre refresque tokens o se regenere el sitemap de Google cada hora:
 
 ```bash
 # Linux/macOS
@@ -284,7 +278,10 @@ backend/
 | POST   | `/api/portals/mercadolibre/webhook` | no | Webhook de notificaciones |
 | POST   | `/api/portals/properties/{code}/fincaraiz/publish` | sí | Publicar en FR |
 | POST   | `/api/portals/properties/{code}/ciencuadras/publish` | sí | Publicar en CC |
-| POST   | `/api/portals/proppit/generate` | sí | Genera feed XML Proppit |
+| POST   | `/api/portals/properties/{code}/proppit/publish` | sí | Publicar en Proppit |
+| POST   | `/api/portals/properties/{code}/proppit/update` | sí | Actualizar en Proppit |
+| POST   | `/api/portals/properties/{code}/proppit/pause` | sí | Despublicar en Proppit |
+| POST   | `/api/portals/properties/{code}/proppit/verify` | sí | Verificar en Proppit |
 | POST   | `/api/portals/google/generate` | sí | Genera sitemap Google |
 
 ## Troubleshooting

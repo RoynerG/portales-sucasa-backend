@@ -12,6 +12,7 @@ use App\Http\Controllers\Portal\CiencuadrasMappingController;
 use App\Http\Controllers\Portal\FincaraizController;
 use App\Http\Controllers\Portal\MercadoLibreController;
 use App\Http\Controllers\Portal\PortalErrorController;
+use App\Http\Controllers\Portal\ProppitController;
 use App\Http\Controllers\Portal\XmlController;
 use Illuminate\Support\Facades\Route;
 
@@ -82,7 +83,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/properties/{code}/ciencuadras/delete', [CiencuadrasController::class, 'delete']);
         Route::post('/properties/{code}/ciencuadras/verify', [CiencuadrasController::class, 'consult']);
 
-        Route::post('/proppit/generate', [XmlController::class, 'generateProppit']);
+        Route::post('/proppit/login', [ProppitController::class, 'login']);
+        Route::get('/properties/{code}/proppit/payload', [ProppitController::class, 'payload']);
+        Route::post('/properties/{code}/proppit/publish', [ProppitController::class, 'publish']);
+        Route::post('/properties/{code}/proppit/update', [ProppitController::class, 'update']);
+        Route::post('/properties/{code}/proppit/pause', [ProppitController::class, 'pause']);
+        Route::post('/properties/{code}/proppit/verify', [ProppitController::class, 'verify']);
+
         Route::post('/google/generate', [XmlController::class, 'generateGoogle']);
     });
 });

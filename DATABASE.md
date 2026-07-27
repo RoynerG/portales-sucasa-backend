@@ -315,7 +315,8 @@ Los 5 portales base ya están seedeados. **No elimines** sin antes quitar las FK
 - **MercadoLibre**: automáticamente al hacer OAuth (botón "Conectar" en integraciones).
 - **Fincaraíz**: manualmente con el API key que te dio el portal.
 - **Ciencuadras**: con el login, el backend hace el `POST /login` y guarda el token.
-- **Proppit / Google**: no requieren credenciales (son feeds estáticos).
+- **Proppit**: usa API real-time v2; el backend obtiene token con `PROPPIT_USER` y `PROPPIT_PASSWORD`, y guarda el token en `portal_credentials`.
+- **Google**: no requiere credenciales; se genera como sitemap XML.
 
 ```php
 PortalCredential::create([
@@ -660,7 +661,7 @@ mysqldump -u root -p sucasa_panel > backup_$(date +%Y%m%d).sql
 php artisan backup:run   # si instalás spatie/laravel-backup
 ```
 
-### Regenerar feeds XML
+### Regenerar sitemap XML de Google
 ```bash
 php artisan portals:generate-feeds
 ```

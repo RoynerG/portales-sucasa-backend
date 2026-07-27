@@ -6,7 +6,7 @@ use App\Services\Portals\CiencuadrasClient;
 use App\Services\Portals\FincaraizClient;
 use App\Services\Portals\GoogleSitemapGenerator;
 use App\Services\Portals\MercadoLibreClient;
-use App\Services\Portals\ProppitFeedGenerator;
+use App\Services\Portals\ProppitClient;
 use GuzzleHttp\Client;
 use Illuminate\Support\ServiceProvider;
 
@@ -27,7 +27,11 @@ class AppServiceProvider extends ServiceProvider
             'http_errors' => false,
             'verify' => true,
         ])));
-        $this->app->singleton(ProppitFeedGenerator::class);
+        $this->app->singleton(ProppitClient::class, fn () => new ProppitClient(new Client([
+            'timeout' => 45,
+            'http_errors' => true,
+            'verify' => true,
+        ])));
         $this->app->singleton(GoogleSitemapGenerator::class);
     }
 

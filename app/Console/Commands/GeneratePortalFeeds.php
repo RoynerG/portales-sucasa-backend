@@ -3,23 +3,21 @@
 namespace App\Console\Commands;
 
 use App\Services\Portals\GoogleSitemapGenerator;
-use App\Services\Portals\ProppitFeedGenerator;
 use Illuminate\Console\Command;
 
 class GeneratePortalFeeds extends Command
 {
-    protected $signature = 'portals:generate-feeds {--portal=* : proprtit,google}';
+    protected $signature = 'portals:generate-feeds {--portal=* : google}';
 
-    protected $description = 'Genera los feeds XML (Proppit, Google Sitemap) a partir de las propiedades activas.';
+    protected $description = 'Genera feeds XML soportados a partir de las propiedades activas.';
 
-    public function handle(ProppitFeedGenerator $proppit, GoogleSitemapGenerator $google): int
+    public function handle(GoogleSitemapGenerator $google): int
     {
-        $portals = $this->option('portal') ?: ['proppit', 'google'];
+        $portals = $this->option('portal') ?: ['google'];
 
         foreach ($portals as $portal) {
             $this->info("Generando feed: {$portal}");
             $path = match ($portal) {
-                'proppit' => $proppit->writeToFile(),
                 'google' => $google->writeToFile(),
                 default => null,
             };

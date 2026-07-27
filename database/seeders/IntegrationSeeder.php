@@ -46,12 +46,12 @@ class IntegrationSeeder extends Seeder
             [
                 'name' => 'Proppit',
                 'slug' => 'proppit',
-                'api_class' => 'App\\Services\\Portals\\ProppitFeedGenerator',
-                'description' => 'Feed XML Lifull Connect para distribución masiva.',
-                'icon' => 'fa-rss',
+                'api_class' => 'App\\Services\\Portals\\ProppitClient',
+                'description' => 'API real-time v2 para publicar, actualizar y despublicar inmuebles.',
+                'icon' => 'fa-bolt',
                 'color' => '#a855f7',
                 'website_url' => 'https://www.proppit.com',
-                'config_schema' => ['fields' => []],
+                'config_schema' => ['fields' => ['user', 'password', 'publisher_external_id']],
                 'order' => 4,
             ],
             [

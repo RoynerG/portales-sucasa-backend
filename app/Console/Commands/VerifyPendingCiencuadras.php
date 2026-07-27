@@ -51,7 +51,7 @@ class VerifyPendingCiencuadras extends Command
             }
 
             $code = (string) $status->property->code;
-            $externalCode = $status->external_id ?: config('portals.ciencuadras.property_code_prefix') . $code;
+            $externalCode = $this->externalCode($status->external_id ?: $code);
             $lastResponse = $status->last_response ?? [];
             $idRequest = $client->extractIdRequest($lastResponse);
             $targetStatus = $lastResponse['target_status'] ?? null;
@@ -76,7 +76,7 @@ class VerifyPendingCiencuadras extends Command
             $status->fill([
                 'sync_status' => $syncStatus,
                 'external_id' => $externalCode,
-                'external_url' => $syncStatus === 'paused' ? null : ($this->extractPublicUrl($response) ?: $status->external_url ?: $this->propertyWebUrl($code)),
+                'external_url' => $this->publicUrlForStatus($syncStatus, $targetStatus, $response, $status->external_url ?: $this->propertyWebUrl($code)),
                 'last_response' => $response,
                 'last_error' => $error,
                 'last_attempt_at' => now(),
@@ -87,8 +87,6 @@ class VerifyPendingCiencuadras extends Command
 
             if ($syncStatus === 'synced') {
                 $status->property->update(['status' => 'active', 'published_at' => $status->property->published_at ?: now()]);
-            } elseif ($syncStatus === 'paused') {
-                $status->property->update(['status' => 'paused']);
             }
 
             $summary[$syncStatus] = ($summary[$syncStatus] ?? 0) + 1;
@@ -198,6 +196,31 @@ class VerifyPendingCiencuadras extends Command
         }
 
         return null;
+    }
+
+    protected function publicUrlForStatus(string $syncStatus, ?string $targetStatus, array $response, ?string $fallbackUrl = null): ?string
+    {
+        if ($syncStatus === 'paused' || in_array($targetStatus, ['I', 'D'], true)) {
+            return null;
+        }
+
+        return $this->extractPublicUrl($response) ?: $fallbackUrl;
+    }
+
+    protected function externalCode(string $code): string
+    {
+        $prefix = (string) config('portals.ciencuadras.property_code_prefix');
+        $code = trim($code);
+
+        while ($prefix !== '' && str_starts_with($code, $prefix)) {
+            $code = substr($code, strlen($prefix));
+        }
+
+        if ($prefix !== '' && str_contains($code, $prefix)) {
+            $code = substr($code, strrpos($code, $prefix) + strlen($prefix));
+        }
+
+        return $prefix . $code;
     }
 
     protected function propertyWebUrl(string $code): string

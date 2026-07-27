@@ -43,12 +43,12 @@ class CiencuadrasController extends Controller
 
     public function pause(Request $request, string $code): JsonResponse
     {
-        return $this->send($request, $code, action: 'update', status: 'I');
+        return $this->send($request, $code, action: 'pause', status: 'I');
     }
 
     public function delete(Request $request, string $code): JsonResponse
     {
-        return $this->send($request, $code, action: 'update', status: 'D');
+        return $this->send($request, $code, action: 'delete', status: 'D');
     }
 
     public function consult(Request $request, string $code): JsonResponse
@@ -103,7 +103,7 @@ class CiencuadrasController extends Controller
             'action' => $targetAction,
             'target_status' => $targetStatus,
             'sync_status' => $syncStatus,
-            'public_url' => $syncStatus === 'paused' ? null : ($this->extractPublicUrl($response) ?: $webUrl),
+            'public_url' => $this->publicUrlForStatus($syncStatus, $targetStatus, $response, $webUrl),
             'web_url' => $webUrl,
             'response' => $response,
         ]]);
@@ -154,8 +154,10 @@ class CiencuadrasController extends Controller
         if ($idRequest) {
             $statusResult = $this->cc->consultStatus(['idRequest' => $idRequest], $cred);
         }
-        $consultCode = $this->extractPropertyCode($statusResult['data'] ?? null)
-            ?: $this->consultCodeFromPayload((string) $mapped['payload']['propertyCode']);
+        $reportedCode = $this->extractPropertyCode($statusResult['data'] ?? null);
+        $consultCode = $reportedCode
+            ? $this->mapper->externalCode($reportedCode)
+            : $this->consultCodeFromPayload((string) $mapped['payload']['propertyCode']);
         $propertyResult = $result['ok']
             ? $this->cc->consultProperty($consultCode, $cred)
             : null;
@@ -178,9 +180,7 @@ class CiencuadrasController extends Controller
             $webUrl
         );
 
-        if ($syncStatus === 'paused') {
-            $property->update(['status' => 'paused']);
-        } elseif ($syncStatus === 'synced') {
+        if ($syncStatus === 'synced') {
             $property->update(['status' => 'active', 'published_at' => now()]);
         }
 
@@ -192,7 +192,7 @@ class CiencuadrasController extends Controller
             'target_status' => $status,
             'sync_status' => $syncStatus,
             'id_request' => $idRequest,
-            'public_url' => $syncStatus === 'paused' ? null : ($this->extractPublicUrl($response) ?: $webUrl),
+            'public_url' => $this->publicUrlForStatus($syncStatus, $status, $response, $webUrl),
             'web_url' => $webUrl,
             'response' => $response,
         ]]);
@@ -251,7 +251,7 @@ class CiencuadrasController extends Controller
         $status->fill([
             'sync_status' => $syncStatus,
             'external_id' => $externalId,
-            'external_url' => $syncStatus === 'paused' ? null : ($this->extractPublicUrl($response) ?: $fallbackUrl ?: $status->external_url),
+            'external_url' => $this->publicUrlForStatus($syncStatus, $response['target_status'] ?? null, $response, $fallbackUrl ?: $status->external_url),
             'last_response' => $response,
             'last_error' => $error,
             'last_attempt_at' => now(),
@@ -442,6 +442,15 @@ class CiencuadrasController extends Controller
         }
 
         return null;
+    }
+
+    protected function publicUrlForStatus(string $syncStatus, ?string $targetStatus, array $response, ?string $fallbackUrl = null): ?string
+    {
+        if ($syncStatus === 'paused' || in_array($targetStatus, ['I', 'D'], true)) {
+            return null;
+        }
+
+        return $this->extractPublicUrl($response) ?: $fallbackUrl;
     }
 
     protected function propertyWebUrl(string $code): string

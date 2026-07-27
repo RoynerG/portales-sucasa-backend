@@ -117,8 +117,9 @@ class AutoSyncCiencuadras extends Command
                 $statusResult = $idRequest
                     ? $client->consultStatus(['idRequest' => $idRequest], $credential)
                     : null;
+                $externalCode = $this->externalCode($mapped['payload']['propertyCode']);
                 $propertyResult = $result['ok']
-                    ? $client->consultProperty($mapped['payload']['propertyCode'], $credential)
+                    ? $client->consultProperty($externalCode, $credential)
                     : null;
 
                 $response = [
@@ -135,15 +136,13 @@ class AutoSyncCiencuadras extends Command
                     $property->id,
                     $integration->id,
                     $syncStatus,
-                    $mapped['payload']['propertyCode'],
+                    $externalCode,
                     $response,
                     $syncStatus === 'error' ? $this->errorMessage($response) : null,
                     $this->propertyWebUrl($code)
                 );
 
-                if ($syncStatus === 'paused') {
-                    $property->update(['status' => 'paused']);
-                } elseif ($syncStatus === 'synced') {
+                if ($syncStatus === 'synced') {
                     $property->update(['status' => 'active', 'published_at' => $property->published_at ?: now()]);
                 }
 
@@ -253,7 +252,7 @@ class AutoSyncCiencuadras extends Command
         $status->fill([
             'sync_status' => $syncStatus,
             'external_id' => $externalId,
-            'external_url' => $this->extractPublicUrl($response) ?: $fallbackUrl ?: $status->external_url,
+            'external_url' => $this->publicUrlForStatus($syncStatus, $response['target_status'] ?? null, $response, $fallbackUrl ?: $status->external_url),
             'last_response' => $response,
             'last_error' => $error,
             'last_attempt_at' => now(),
@@ -334,6 +333,31 @@ class AutoSyncCiencuadras extends Command
         }
 
         return null;
+    }
+
+    protected function publicUrlForStatus(string $syncStatus, ?string $targetStatus, array $response, ?string $fallbackUrl = null): ?string
+    {
+        if ($syncStatus === 'paused' || in_array($targetStatus, ['I', 'D'], true)) {
+            return null;
+        }
+
+        return $this->extractPublicUrl($response) ?: $fallbackUrl;
+    }
+
+    protected function externalCode(string $code): string
+    {
+        $prefix = (string) config('portals.ciencuadras.property_code_prefix');
+        $code = trim($code);
+
+        while ($prefix !== '' && str_starts_with($code, $prefix)) {
+            $code = substr($code, strlen($prefix));
+        }
+
+        if ($prefix !== '' && str_contains($code, $prefix)) {
+            $code = substr($code, strrpos($code, $prefix) + strlen($prefix));
+        }
+
+        return $prefix . $code;
     }
 
     protected function propertyWebUrl(string $code): string

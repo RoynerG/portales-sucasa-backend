@@ -48,9 +48,14 @@ class CiencuadrasPropertyMapper
     public function portalPropertyCode(string $code): string
     {
         $prefix = (string) config('portals.ciencuadras.property_code_prefix');
+        $code = trim($code);
 
         while ($prefix !== '' && str_starts_with($code, $prefix)) {
             $code = substr($code, strlen($prefix));
+        }
+
+        if ($prefix !== '' && str_contains($code, $prefix)) {
+            $code = substr($code, strrpos($code, $prefix) + strlen($prefix));
         }
 
         return $code;

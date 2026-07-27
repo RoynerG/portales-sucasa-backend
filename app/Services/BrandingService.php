@@ -46,9 +46,29 @@ class BrandingService
 
             $url = trim((string) ($row->image_url ?? ''));
 
+            if ($this->isLegacyLogo($url)) {
+                return $cache[$function] = '';
+            }
+
             return $cache[$function] = $url;
         } catch (Throwable) {
             return $cache[$function] = '';
         }
+    }
+
+    protected function isLegacyLogo(string $url): bool
+    {
+        $legacyNeedles = [
+            'logo-white-skc-e1781617234571.png',
+            '/images/logo.png',
+        ];
+
+        foreach ($legacyNeedles as $needle) {
+            if (str_contains($url, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

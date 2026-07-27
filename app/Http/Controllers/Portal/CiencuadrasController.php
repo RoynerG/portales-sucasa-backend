@@ -71,7 +71,8 @@ class CiencuadrasController extends Controller
         $statusResult = $idRequest
             ? $this->cc->consultStatus(['idRequest' => $idRequest], $cred)
             : null;
-        $propertyResult = $this->cc->consultProperty($externalCode, $cred);
+        $consultCode = $this->consultCodeForStatus($status, $externalCode);
+        $propertyResult = $this->cc->consultProperty($consultCode, $cred);
 
         $response = [
             'previous' => $lastResponse,
@@ -97,7 +98,7 @@ class CiencuadrasController extends Controller
         return response()->json(['Datos' => [
             'ok' => $propertyResult['ok'] || ($statusResult['ok'] ?? false),
             'environment' => $environment,
-            'external_code' => $externalCode,
+            'external_code' => $consultCode,
             'id_request' => $idRequest,
             'action' => $targetAction,
             'target_status' => $targetStatus,
@@ -124,6 +125,10 @@ class CiencuadrasController extends Controller
     {
         $mapped = $this->mapper->fromCode($code, $status);
         $property = $mapped['property'];
+        $payloadPropertyCode = (string) $mapped['payload']['propertyCode'];
+        if ($action !== 'publish') {
+            $mapped['payload']['propertyCode'] = $this->payloadCodeForExistingListing($property->id, $payloadPropertyCode);
+        }
 
         if ($mapped['errors']) {
             $this->saveStatus($property->id, 'error', $mapped['payload']['propertyCode'], [
@@ -149,8 +154,10 @@ class CiencuadrasController extends Controller
         if ($idRequest) {
             $statusResult = $this->cc->consultStatus(['idRequest' => $idRequest], $cred);
         }
+        $consultCode = $this->extractPropertyCode($statusResult['data'] ?? null)
+            ?: $this->consultCodeFromPayload((string) $mapped['payload']['propertyCode']);
         $propertyResult = $result['ok']
-            ? $this->cc->consultProperty($mapped['payload']['propertyCode'], $cred)
+            ? $this->cc->consultProperty($consultCode, $cred)
             : null;
 
         $response = [
@@ -165,7 +172,7 @@ class CiencuadrasController extends Controller
         $this->saveStatus(
             $property->id,
             $syncStatus,
-            $mapped['payload']['propertyCode'],
+            $consultCode,
             $response,
             $syncStatus === 'error' ? $this->errorMessage($response) : null,
             $webUrl
@@ -180,7 +187,7 @@ class CiencuadrasController extends Controller
         return response()->json(['Datos' => [
             'ok' => $result['ok'] && $syncStatus !== 'error',
             'environment' => config('portals.ciencuadras.environment'),
-            'external_code' => $mapped['payload']['propertyCode'],
+            'external_code' => $consultCode,
             'action' => $action,
             'target_status' => $status,
             'sync_status' => $syncStatus,
@@ -263,20 +270,28 @@ class CiencuadrasController extends Controller
         $data = $statusResult['data'] ?? $result['data'] ?? [];
         $json = strtolower(json_encode($data));
 
-        if (str_contains($json, 'error') || str_contains($json, 'fall')) {
-            return 'error';
-        }
-
         if ($targetStatus === 'I' || $targetStatus === 'D') {
             if ($this->responseIsPending($statusResult['data'] ?? null)) {
                 return 'pending';
             }
 
-            if ($this->responseHasSuccess($statusResult['data'] ?? null) || $this->responseHasNotFound($propertyResult['data'] ?? null)) {
+            if (
+                $this->responseHasSuccess($statusResult['data'] ?? null)
+                || $this->responseHasNotFound($statusResult['data'] ?? null)
+                || $this->responseHasNotFound($propertyResult['data'] ?? null)
+            ) {
                 return 'paused';
             }
 
+            if (str_contains($json, 'error') || str_contains($json, 'fall')) {
+                return 'error';
+            }
+
             return 'pending';
+        }
+
+        if (str_contains($json, 'error') || str_contains($json, 'fall')) {
+            return 'error';
         }
 
         if ($this->responseHasSuccess($propertyResult['data'] ?? null)) {
@@ -300,7 +315,11 @@ class CiencuadrasController extends Controller
                 return 'pending';
             }
 
-            if ($this->responseHasSuccess($statusData) || $this->responseHasNotFound($propertyData)) {
+            if (
+                $this->responseHasSuccess($statusData)
+                || $this->responseHasNotFound($statusData)
+                || $this->responseHasNotFound($propertyData)
+            ) {
                 return 'paused';
             }
 
@@ -328,6 +347,52 @@ class CiencuadrasController extends Controller
         }
 
         return $currentStatus ?: 'pending';
+    }
+
+    protected function consultCodeForStatus(?PropertySyncStatus $status, string $default): string
+    {
+        return $this->extractPropertyCode($status?->last_response ?? null) ?: $default;
+    }
+
+    protected function payloadCodeForExistingListing(int $propertyId, string $default): string
+    {
+        $status = PropertySyncStatus::where([
+            'property_id' => $propertyId,
+            'integration_id' => $this->integration()->id,
+            'environment' => config('portals.ciencuadras.environment'),
+        ])->first();
+        $existingCode = $this->extractPropertyCode($status?->last_response ?? null);
+        $prefix = (string) config('portals.ciencuadras.property_code_prefix');
+
+        if ($existingCode && $prefix && str_starts_with($existingCode, $prefix)) {
+            return substr($existingCode, strlen($prefix));
+        }
+
+        return $default;
+    }
+
+    protected function consultCodeFromPayload(string $payloadCode): string
+    {
+        return (string) config('portals.ciencuadras.property_code_prefix') . $payloadCode;
+    }
+
+    protected function extractPropertyCode($data): ?string
+    {
+        if (! is_array($data)) {
+            return null;
+        }
+
+        foreach ($data as $key => $value) {
+            if (strtolower((string) $key) === 'propertycode' && is_scalar($value)) {
+                return (string) $value;
+            }
+
+            if (is_array($value) && $found = $this->extractPropertyCode($value)) {
+                return $found;
+            }
+        }
+
+        return null;
     }
 
     protected function responseIsPending($data): bool

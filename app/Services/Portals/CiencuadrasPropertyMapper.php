@@ -45,6 +45,13 @@ class CiencuadrasPropertyMapper
         return (string) config('portals.ciencuadras.property_code_prefix') . $code;
     }
 
+    public function portalPropertyCode(string $code): string
+    {
+        $prefix = (string) config('portals.ciencuadras.property_code_prefix');
+
+        return str_starts_with($code, $prefix) ? substr($code, strlen($prefix)) : $code;
+    }
+
     protected function payload(stdClass $row, ?stdClass $consultant, string $status): array
     {
         $typeId = $this->propertyTypeId($row->tipo_inmueble);
@@ -61,7 +68,7 @@ class CiencuadrasPropertyMapper
             'address' => $this->text($row->direccion ?: $row->direccion_fisica ?: $row->barrio),
             'showAddress' => 1,
             'stratum' => max(0, min(8, (int) ($this->integer($row->estrato) ?? 0))),
-            'propertyCode' => $this->externalCode((string) $row->codigo),
+            'propertyCode' => $this->portalPropertyCode((string) $row->codigo),
             'latitude' => $this->number($row->latitud),
             'longitude' => $this->number($row->longitud),
             'sellingPrice' => $this->sellingPrice($row, $transactionId),

@@ -371,7 +371,7 @@ class AutoSyncCiencuadras extends Command
             $code = substr($code, strrpos($code, $prefix) + strlen($prefix));
         }
 
-        return $prefix === '' ? $code : $prefix . 'P' . $prefix . $code;
+        return $prefix === '' ? $code : $prefix . 'P' . $code;
     }
 
     protected function propertyWebUrl(string $code): string

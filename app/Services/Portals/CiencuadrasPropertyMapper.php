@@ -50,7 +50,7 @@ class CiencuadrasPropertyMapper
         $prefix = (string) config('portals.ciencuadras.property_code_prefix');
         $portalCode = $this->portalPropertyCode($code);
 
-        return $prefix === '' ? $portalCode : $prefix . 'P' . $prefix . $portalCode;
+        return $prefix === '' ? $portalCode : $prefix . 'P' . $portalCode;
     }
 
     public function portalPropertyCode(string $code): string
@@ -58,15 +58,15 @@ class CiencuadrasPropertyMapper
         $prefix = (string) config('portals.ciencuadras.property_code_prefix');
         $code = trim($code);
 
-        while ($prefix !== '' && str_starts_with($code, $prefix)) {
-            $code = substr($code, strlen($prefix));
+        if ($prefix !== '') {
+            $prefixPattern = preg_quote($prefix, '/');
+            $code = preg_replace('/^(?:' . $prefixPattern . '|P' . $prefixPattern . '|P)+/i', '', $code) ?? $code;
+            if (str_contains($code, $prefix)) {
+                $code = substr($code, strrpos($code, $prefix) + strlen($prefix));
+            }
         }
 
-        if ($prefix !== '' && str_contains($code, $prefix)) {
-            $code = substr($code, strrpos($code, $prefix) + strlen($prefix));
-        }
-
-        return $code;
+        return preg_replace('/^P(?=\d)/i', '', $code) ?? $code;
     }
 
     protected function payload(stdClass $row, ?stdClass $consultant, string $status): array

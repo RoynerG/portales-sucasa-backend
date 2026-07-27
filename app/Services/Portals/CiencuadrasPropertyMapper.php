@@ -42,14 +42,18 @@ class CiencuadrasPropertyMapper
 
     public function externalCode(string $code): string
     {
-        return (string) config('portals.ciencuadras.property_code_prefix') . $code;
+        return (string) config('portals.ciencuadras.property_code_prefix') . $this->portalPropertyCode($code);
     }
 
     public function portalPropertyCode(string $code): string
     {
         $prefix = (string) config('portals.ciencuadras.property_code_prefix');
 
-        return str_starts_with($code, $prefix) ? substr($code, strlen($prefix)) : $code;
+        while ($prefix !== '' && str_starts_with($code, $prefix)) {
+            $code = substr($code, strlen($prefix));
+        }
+
+        return $code;
     }
 
     protected function payload(stdClass $row, ?stdClass $consultant, string $status): array

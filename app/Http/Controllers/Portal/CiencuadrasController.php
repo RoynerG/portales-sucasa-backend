@@ -351,7 +351,9 @@ class CiencuadrasController extends Controller
 
     protected function consultCodeForStatus(?PropertySyncStatus $status, string $default): string
     {
-        return $this->extractPropertyCode($status?->last_response ?? null) ?: $default;
+        $existingCode = $this->extractPropertyCode($status?->last_response ?? null) ?: $default;
+
+        return $this->mapper->externalCode($existingCode);
     }
 
     protected function payloadCodeForExistingListing(int $propertyId, string $default): string
@@ -362,18 +364,17 @@ class CiencuadrasController extends Controller
             'environment' => config('portals.ciencuadras.environment'),
         ])->first();
         $existingCode = $this->extractPropertyCode($status?->last_response ?? null);
-        $prefix = (string) config('portals.ciencuadras.property_code_prefix');
 
-        if ($existingCode && $prefix && str_starts_with($existingCode, $prefix)) {
-            return substr($existingCode, strlen($prefix));
+        if ($existingCode) {
+            return $this->mapper->portalPropertyCode($existingCode);
         }
 
-        return $default;
+        return $this->mapper->portalPropertyCode($default);
     }
 
     protected function consultCodeFromPayload(string $payloadCode): string
     {
-        return (string) config('portals.ciencuadras.property_code_prefix') . $payloadCode;
+        return $this->mapper->externalCode($payloadCode);
     }
 
     protected function extractPropertyCode($data): ?string

@@ -499,14 +499,44 @@ class WordPressPropertyRepository
 
     protected function money($value): ?float
     {
-        $number = preg_replace('/[^\d.]/', '', (string) $value);
+        $number = $this->normalizeNumericText($value);
+
         return $number === '' ? null : (float) $number;
     }
 
     protected function number($value): ?float
     {
-        $number = str_replace(',', '.', trim((string) $value));
+        $number = $this->normalizeNumericText($value, keepThousands: false);
+
         return is_numeric($number) ? (float) $number : null;
+    }
+
+    protected function normalizeNumericText($value, bool $keepThousands = true): string
+    {
+        $number = trim((string) $value);
+        if ($number === '') {
+            return '';
+        }
+
+        $number = preg_replace('/[^\d,.-]/', '', $number);
+        if ($number === '') {
+            return '';
+        }
+
+        if (
+            str_contains($number, ',')
+            && ! str_contains($number, '.')
+            && (substr_count($number, ',') > 1 || preg_match('/^\d{1,3}(,\d{3})+$/', $number))
+        ) {
+            $number = str_replace(',', '', $number);
+        } elseif (str_contains($number, ',')) {
+            $number = str_replace('.', '', $number);
+            $number = str_replace(',', '.', $number);
+        } elseif ($keepThousands && (substr_count($number, '.') > 1 || preg_match('/^\d{1,3}(\.\d{3})+$/', $number))) {
+            $number = str_replace('.', '', $number);
+        }
+
+        return preg_replace('/[^\d.-]/', '', $number);
     }
 
     protected function integer($value): ?int

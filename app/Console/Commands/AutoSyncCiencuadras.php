@@ -117,7 +117,7 @@ class AutoSyncCiencuadras extends Command
                 $statusResult = $idRequest
                     ? $client->consultStatus(['idRequest' => $idRequest], $credential)
                     : null;
-                $externalCode = $this->externalCode($mapped['payload']['propertyCode']);
+                $externalCode = $this->lookupCode($mapped['payload']['propertyCode']);
                 $propertyResult = $result['ok']
                     ? $client->consultProperty($externalCode, $credential)
                     : null;
@@ -273,7 +273,11 @@ class AutoSyncCiencuadras extends Command
                 return 'pending';
             }
 
-            if ($this->responseHasSuccess($statusResult['data'] ?? null) || $this->responseHasNotFound($propertyResult['data'] ?? null)) {
+            if (
+                $this->responseHasSuccess($statusResult['data'] ?? null)
+                || $this->responseHasInactive($propertyResult['data'] ?? null)
+                || $this->responseHasNotFound($propertyResult['data'] ?? null)
+            ) {
                 return 'paused';
             }
 
@@ -321,6 +325,16 @@ class AutoSyncCiencuadras extends Command
             || str_contains($json, 'no tiene inmuebles');
     }
 
+    protected function responseHasInactive($data): bool
+    {
+        $json = strtolower(json_encode($data ?? []));
+
+        return str_contains($json, 'eliminado')
+            || str_contains($json, 'inactivo')
+            || str_contains($json, '"active":"eliminado"')
+            || str_contains($json, '"status":"8"');
+    }
+
     protected function extractPublicUrl(array $response): ?string
     {
         $json = json_encode($response);
@@ -344,7 +358,7 @@ class AutoSyncCiencuadras extends Command
         return $this->extractPublicUrl($response) ?: $fallbackUrl;
     }
 
-    protected function externalCode(string $code): string
+    protected function lookupCode(string $code): string
     {
         $prefix = (string) config('portals.ciencuadras.property_code_prefix');
         $code = trim($code);
@@ -357,7 +371,7 @@ class AutoSyncCiencuadras extends Command
             $code = substr($code, strrpos($code, $prefix) + strlen($prefix));
         }
 
-        return $prefix . $code;
+        return $prefix === '' ? $code : $prefix . 'P' . $prefix . $code;
     }
 
     protected function propertyWebUrl(string $code): string

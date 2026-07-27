@@ -45,6 +45,14 @@ class CiencuadrasPropertyMapper
         return (string) config('portals.ciencuadras.property_code_prefix') . $this->portalPropertyCode($code);
     }
 
+    public function lookupCode(string $code): string
+    {
+        $prefix = (string) config('portals.ciencuadras.property_code_prefix');
+        $portalCode = $this->portalPropertyCode($code);
+
+        return $prefix === '' ? $portalCode : $prefix . 'P' . $prefix . $portalCode;
+    }
+
     public function portalPropertyCode(string $code): string
     {
         $prefix = (string) config('portals.ciencuadras.property_code_prefix');

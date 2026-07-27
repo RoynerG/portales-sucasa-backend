@@ -51,7 +51,7 @@ class VerifyPendingCiencuadras extends Command
             }
 
             $code = (string) $status->property->code;
-            $externalCode = $this->externalCode($status->external_id ?: $code);
+            $externalCode = $this->lookupCode($status->external_id ?: $code);
             $lastResponse = $status->last_response ?? [];
             $idRequest = $client->extractIdRequest($lastResponse);
             $targetStatus = $lastResponse['target_status'] ?? null;
@@ -120,7 +120,7 @@ class VerifyPendingCiencuadras extends Command
                 return 'pending';
             }
 
-            if ($this->responseHasSuccess($statusData) || $this->responseHasNotFound($propertyData)) {
+            if ($this->responseHasSuccess($statusData) || $this->responseHasInactive($propertyData) || $this->responseHasNotFound($propertyData)) {
                 return 'paused';
             }
 
@@ -184,6 +184,16 @@ class VerifyPendingCiencuadras extends Command
             || str_contains($json, 'no tiene inmuebles');
     }
 
+    protected function responseHasInactive($data): bool
+    {
+        $json = strtolower(json_encode($data ?? []));
+
+        return str_contains($json, 'eliminado')
+            || str_contains($json, 'inactivo')
+            || str_contains($json, '"active":"eliminado"')
+            || str_contains($json, '"status":"8"');
+    }
+
     protected function extractPublicUrl(array $response): ?string
     {
         $json = json_encode($response);
@@ -207,7 +217,7 @@ class VerifyPendingCiencuadras extends Command
         return $this->extractPublicUrl($response) ?: $fallbackUrl;
     }
 
-    protected function externalCode(string $code): string
+    protected function lookupCode(string $code): string
     {
         $prefix = (string) config('portals.ciencuadras.property_code_prefix');
         $code = trim($code);
@@ -220,7 +230,7 @@ class VerifyPendingCiencuadras extends Command
             $code = substr($code, strrpos($code, $prefix) + strlen($prefix));
         }
 
-        return $prefix . $code;
+        return $prefix === '' ? $code : $prefix . 'P' . $prefix . $code;
     }
 
     protected function propertyWebUrl(string $code): string

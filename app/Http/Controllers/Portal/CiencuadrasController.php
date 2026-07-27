@@ -56,7 +56,7 @@ class CiencuadrasController extends Controller
         $cred = $this->credential($request);
         $integration = $this->integration();
         $environment = config('portals.ciencuadras.environment');
-        $externalCode = $this->mapper->externalCode($code);
+        $externalCode = $this->mapper->lookupCode($code);
         $property = Property::where('code', $code)->first();
         $status = $property ? PropertySyncStatus::where([
             'property_id' => $property->id,
@@ -156,7 +156,7 @@ class CiencuadrasController extends Controller
         }
         $reportedCode = $this->extractPropertyCode($statusResult['data'] ?? null);
         $consultCode = $reportedCode
-            ? $this->mapper->externalCode($reportedCode)
+            ? $this->mapper->lookupCode($reportedCode)
             : $this->consultCodeFromPayload((string) $mapped['payload']['propertyCode']);
         $propertyResult = $result['ok']
             ? $this->cc->consultProperty($consultCode, $cred)
@@ -278,6 +278,7 @@ class CiencuadrasController extends Controller
             if (
                 $this->responseHasSuccess($statusResult['data'] ?? null)
                 || $this->responseHasNotFound($statusResult['data'] ?? null)
+                || $this->responseHasInactive($propertyResult['data'] ?? null)
                 || $this->responseHasNotFound($propertyResult['data'] ?? null)
             ) {
                 return 'paused';
@@ -318,6 +319,7 @@ class CiencuadrasController extends Controller
             if (
                 $this->responseHasSuccess($statusData)
                 || $this->responseHasNotFound($statusData)
+                || $this->responseHasInactive($propertyData)
                 || $this->responseHasNotFound($propertyData)
             ) {
                 return 'paused';
@@ -353,7 +355,7 @@ class CiencuadrasController extends Controller
     {
         $existingCode = $this->extractPropertyCode($status?->last_response ?? null) ?: $default;
 
-        return $this->mapper->externalCode($existingCode);
+        return $this->mapper->lookupCode($existingCode);
     }
 
     protected function payloadCodeForExistingListing(int $propertyId, string $default): string
@@ -374,7 +376,7 @@ class CiencuadrasController extends Controller
 
     protected function consultCodeFromPayload(string $payloadCode): string
     {
-        return $this->mapper->externalCode($payloadCode);
+        return $this->mapper->lookupCode($payloadCode);
     }
 
     protected function extractPropertyCode($data): ?string
@@ -428,6 +430,16 @@ class CiencuadrasController extends Controller
         return str_contains($json, 'no existe')
             || str_contains($json, 'not found')
             || str_contains($json, 'no tiene inmuebles');
+    }
+
+    protected function responseHasInactive($data): bool
+    {
+        $json = strtolower(json_encode($data ?? []));
+
+        return str_contains($json, 'eliminado')
+            || str_contains($json, 'inactivo')
+            || str_contains($json, '"active":"eliminado"')
+            || str_contains($json, '"status":"8"');
     }
 
     protected function extractPublicUrl(array $response): ?string

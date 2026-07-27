@@ -54,6 +54,7 @@ class VerifyPendingCiencuadras extends Command
             $externalCode = $status->external_id ?: config('portals.ciencuadras.property_code_prefix') . $code;
             $lastResponse = $status->last_response ?? [];
             $idRequest = $client->extractIdRequest($lastResponse);
+            $targetStatus = $lastResponse['target_status'] ?? null;
 
             $statusResult = $idRequest
                 ? $client->consultStatus(['idRequest' => $idRequest], $credential)
@@ -62,10 +63,12 @@ class VerifyPendingCiencuadras extends Command
 
             $response = [
                 'previous' => $lastResponse,
+                'target_action' => $lastResponse['target_action'] ?? null,
+                'target_status' => $targetStatus,
                 'status_check' => $statusResult['data'] ?? null,
                 'property_check' => $propertyResult['data'] ?? null,
             ];
-            $syncStatus = $this->syncState($statusResult, $propertyResult, $status->sync_status);
+            $syncStatus = $this->syncState($statusResult, $propertyResult, $status->sync_status, $targetStatus);
             $error = $syncStatus === 'error'
                 ? substr(json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 0, 2000)
                 : null;
@@ -73,7 +76,7 @@ class VerifyPendingCiencuadras extends Command
             $status->fill([
                 'sync_status' => $syncStatus,
                 'external_id' => $externalCode,
-                'external_url' => $this->extractPublicUrl($response) ?: $status->external_url ?: $this->propertyWebUrl($code),
+                'external_url' => $syncStatus === 'paused' ? null : ($this->extractPublicUrl($response) ?: $status->external_url ?: $this->propertyWebUrl($code)),
                 'last_response' => $response,
                 'last_error' => $error,
                 'last_attempt_at' => now(),
@@ -84,6 +87,8 @@ class VerifyPendingCiencuadras extends Command
 
             if ($syncStatus === 'synced') {
                 $status->property->update(['status' => 'active', 'published_at' => $status->property->published_at ?: now()]);
+            } elseif ($syncStatus === 'paused') {
+                $status->property->update(['status' => 'paused']);
             }
 
             $summary[$syncStatus] = ($summary[$syncStatus] ?? 0) + 1;
@@ -107,10 +112,26 @@ class VerifyPendingCiencuadras extends Command
         return $token ? new PortalCredential(['access_token' => $token]) : null;
     }
 
-    protected function syncState(?array $statusResult, array $propertyResult, ?string $currentStatus): string
+    protected function syncState(?array $statusResult, array $propertyResult, ?string $currentStatus, ?string $targetStatus = null): string
     {
         $statusData = $statusResult['data'] ?? null;
         $propertyData = $propertyResult['data'] ?? null;
+
+        if ($targetStatus === 'I' || $targetStatus === 'D' || $currentStatus === 'paused') {
+            if ($this->responseIsPending($statusData)) {
+                return 'pending';
+            }
+
+            if ($this->responseHasSuccess($statusData) || $this->responseHasNotFound($propertyData)) {
+                return 'paused';
+            }
+
+            if ($this->responseHasError($statusData) || ! ($propertyResult['ok'] ?? false)) {
+                return 'error';
+            }
+
+            return 'pending';
+        }
 
         if ($this->responseHasSuccess($statusData) || $this->responseHasSuccess($propertyData)) {
             return 'synced';

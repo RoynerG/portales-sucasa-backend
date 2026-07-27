@@ -122,6 +122,8 @@ class AutoSyncCiencuadras extends Command
                     : null;
 
                 $response = [
+                    'target_action' => $action,
+                    'target_status' => $status,
                     'request' => $result['data'],
                     'status_check' => $statusResult['data'] ?? null,
                     'property_check' => $propertyResult['data'] ?? null,
@@ -268,7 +270,15 @@ class AutoSyncCiencuadras extends Command
         }
 
         if ($targetStatus === 'I') {
-            return 'paused';
+            if ($this->responseIsPending($statusResult['data'] ?? null)) {
+                return 'pending';
+            }
+
+            if ($this->responseHasSuccess($statusResult['data'] ?? null) || $this->responseHasNotFound($propertyResult['data'] ?? null)) {
+                return 'paused';
+            }
+
+            return 'pending';
         }
 
         if ($this->responseHasSuccess($statusResult['data'] ?? null) || $this->responseHasSuccess($propertyResult['data'] ?? null)) {
@@ -296,6 +306,20 @@ class AutoSyncCiencuadras extends Command
             || str_contains($json, 'procesado')
             || str_contains($json, 'éxito')
             || str_contains($json, 'exito');
+    }
+
+    protected function responseIsPending($data): bool
+    {
+        return str_contains(strtolower(json_encode($data ?? [])), 'pending');
+    }
+
+    protected function responseHasNotFound($data): bool
+    {
+        $json = strtolower(json_encode($data ?? []));
+
+        return str_contains($json, 'no existe')
+            || str_contains($json, 'not found')
+            || str_contains($json, 'no tiene inmuebles');
     }
 
     protected function extractPublicUrl(array $response): ?string

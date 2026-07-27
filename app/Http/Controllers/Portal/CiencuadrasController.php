@@ -66,6 +66,8 @@ class CiencuadrasController extends Controller
 
         $lastResponse = $status?->last_response ?? [];
         $idRequest = $this->cc->extractIdRequest($lastResponse);
+        $targetStatus = $lastResponse['target_status'] ?? null;
+        $targetAction = $lastResponse['target_action'] ?? null;
         $statusResult = $idRequest
             ? $this->cc->consultStatus(['idRequest' => $idRequest], $cred)
             : null;
@@ -73,10 +75,12 @@ class CiencuadrasController extends Controller
 
         $response = [
             'previous' => $lastResponse,
+            'target_action' => $targetAction,
+            'target_status' => $targetStatus,
             'status_check' => $statusResult['data'] ?? null,
             'property_check' => $propertyResult['data'] ?? null,
         ];
-        $syncStatus = $this->verifiedSyncState($statusResult, $propertyResult, $status?->sync_status);
+        $syncStatus = $this->verifiedSyncState($statusResult, $propertyResult, $status?->sync_status, $targetStatus);
         $webUrl = $this->propertyWebUrl($code);
 
         if ($property) {
@@ -95,8 +99,10 @@ class CiencuadrasController extends Controller
             'environment' => $environment,
             'external_code' => $externalCode,
             'id_request' => $idRequest,
+            'action' => $targetAction,
+            'target_status' => $targetStatus,
             'sync_status' => $syncStatus,
-            'public_url' => $this->extractPublicUrl($response) ?: $webUrl,
+            'public_url' => $syncStatus === 'paused' ? null : ($this->extractPublicUrl($response) ?: $webUrl),
             'web_url' => $webUrl,
             'response' => $response,
         ]]);
@@ -148,6 +154,8 @@ class CiencuadrasController extends Controller
             : null;
 
         $response = [
+            'target_action' => $action,
+            'target_status' => $status,
             'request' => $result['data'],
             'status_check' => $statusResult['data'] ?? null,
             'property_check' => $propertyResult['data'] ?? null,
@@ -173,9 +181,11 @@ class CiencuadrasController extends Controller
             'ok' => $result['ok'] && $syncStatus !== 'error',
             'environment' => config('portals.ciencuadras.environment'),
             'external_code' => $mapped['payload']['propertyCode'],
+            'action' => $action,
+            'target_status' => $status,
             'sync_status' => $syncStatus,
             'id_request' => $idRequest,
-            'public_url' => $this->extractPublicUrl($response) ?: $webUrl,
+            'public_url' => $syncStatus === 'paused' ? null : ($this->extractPublicUrl($response) ?: $webUrl),
             'web_url' => $webUrl,
             'response' => $response,
         ]]);
@@ -234,7 +244,7 @@ class CiencuadrasController extends Controller
         $status->fill([
             'sync_status' => $syncStatus,
             'external_id' => $externalId,
-            'external_url' => $this->extractPublicUrl($response) ?: $fallbackUrl ?: $status->external_url,
+            'external_url' => $syncStatus === 'paused' ? null : ($this->extractPublicUrl($response) ?: $fallbackUrl ?: $status->external_url),
             'last_response' => $response,
             'last_error' => $error,
             'last_attempt_at' => now(),
@@ -258,7 +268,15 @@ class CiencuadrasController extends Controller
         }
 
         if ($targetStatus === 'I' || $targetStatus === 'D') {
-            return 'paused';
+            if ($this->responseIsPending($statusResult['data'] ?? null)) {
+                return 'pending';
+            }
+
+            if ($this->responseHasSuccess($statusResult['data'] ?? null) || $this->responseHasNotFound($propertyResult['data'] ?? null)) {
+                return 'paused';
+            }
+
+            return 'pending';
         }
 
         if ($this->responseHasSuccess($propertyResult['data'] ?? null)) {
@@ -272,10 +290,26 @@ class CiencuadrasController extends Controller
         return 'synced';
     }
 
-    protected function verifiedSyncState(?array $statusResult, array $propertyResult, ?string $currentStatus): string
+    protected function verifiedSyncState(?array $statusResult, array $propertyResult, ?string $currentStatus, ?string $targetStatus = null): string
     {
         $statusData = $statusResult['data'] ?? null;
         $propertyData = $propertyResult['data'] ?? null;
+
+        if ($targetStatus === 'I' || $targetStatus === 'D' || $currentStatus === 'paused') {
+            if ($this->responseIsPending($statusData)) {
+                return 'pending';
+            }
+
+            if ($this->responseHasSuccess($statusData) || $this->responseHasNotFound($propertyData)) {
+                return 'paused';
+            }
+
+            if ($this->responseHasError($statusData) || ! ($propertyResult['ok'] ?? false)) {
+                return 'error';
+            }
+
+            return 'pending';
+        }
 
         if ($this->responseHasSuccess($statusData) || $this->responseHasSuccess($propertyData)) {
             return 'synced';

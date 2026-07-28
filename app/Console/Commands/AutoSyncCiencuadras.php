@@ -7,6 +7,7 @@ use App\Models\PortalCredential;
 use App\Models\Property;
 use App\Models\PropertySyncStatus;
 use App\Services\Portals\CiencuadrasClient;
+use App\Services\Portals\CiencuadrasActiveProperties;
 use App\Services\Portals\CiencuadrasPropertyMapper;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
@@ -26,7 +27,11 @@ class AutoSyncCiencuadras extends Command
 
     protected $description = 'Publica, actualiza o despublica automáticamente inmuebles en Ciencuadras según la tabla WP.';
 
-    public function handle(CiencuadrasClient $client, CiencuadrasPropertyMapper $mapper): int
+    public function handle(
+        CiencuadrasClient $client,
+        CiencuadrasPropertyMapper $mapper,
+        CiencuadrasActiveProperties $activeProperties
+    ): int
     {
         if (! config('portals.ciencuadras.auto_sync') && ! $this->option('force')) {
             $this->info('Auto-sync de Ciencuadras apagado. Actívalo con CIENCUADRAS_AUTO_SYNC=true.');
@@ -42,6 +47,8 @@ class AutoSyncCiencuadras extends Command
         $limit = max(1, (int) ($this->option('limit') ?: config('portals.ciencuadras.auto_sync_limit', 20)));
         $scan = max($limit, (int) ($this->option('scan') ?: config('portals.ciencuadras.auto_sync_scan', 500)));
         $dryRun = (bool) $this->option('dry-run');
+        $legacySourceCodes = $activeProperties->legacySourceCodes() ?? collect();
+        $cleanSourceCodes = $activeProperties->sourceCodes() ?? collect();
 
         $credential = $dryRun ? null : $this->credential($client);
         if (! $dryRun && ! $credential) {
@@ -108,6 +115,15 @@ class AutoSyncCiencuadras extends Command
             }
 
             [$action, $status] = $decision;
+
+            if (in_array($action, ['publish', 'update'], true)
+                && $legacySourceCodes->contains($code)
+                && ! $cleanSourceCodes->contains($code)) {
+                $this->warn("{$code}: bloqueado; Ciencuadras todavía conserva el código legado con P.");
+                $summary['skipped']++;
+                continue;
+            }
+
             $this->line("{$code}: {$action}");
 
             if ($dryRun) {

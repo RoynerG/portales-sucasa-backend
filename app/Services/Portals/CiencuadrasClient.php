@@ -83,7 +83,20 @@ class CiencuadrasClient
 
     protected function propertyBatch(array $payload): array
     {
-        return array_is_list($payload) ? $payload : [$payload];
+        $batch = array_is_list($payload) ? $payload : [$payload];
+
+        foreach ($batch as $property) {
+            $code = trim((string) ($property['propertyCode'] ?? ''));
+            $status = strtoupper(trim((string) ($property['status'] ?? 'A')));
+
+            if ($status === 'A' && preg_match('/(?:^|-)P\d+$/i', $code)) {
+                throw new \InvalidArgumentException(
+                    "Se bloqueó el envío del código legado {$code}. Las publicaciones activas deben usar el código limpio."
+                );
+            }
+        }
+
+        return $batch;
     }
 
     protected function request(string $method, string $path, array $body, PortalCredential $cred): array

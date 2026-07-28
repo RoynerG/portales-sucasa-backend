@@ -12,11 +12,13 @@ class PortalAutomationController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $portal = trim((string) $request->query('portal', 'ciencuadras'));
+        $portal = trim((string) $request->query('portal', 'all'));
         $status = trim((string) $request->query('status', 'all'));
         $action = trim((string) $request->query('action', 'all'));
         $search = trim((string) $request->query('search', ''));
-        $limit = min(500, max(25, (int) $request->query('limit', 200)));
+        $page = max(1, (int) $request->query('page', 1));
+        $perPage = min(100, max(10, (int) $request->query('per_page', $request->query('limit', 25))));
+        $allPortals = $portal === '' || $portal === 'all';
 
         $integrations = Integration::query()
             ->active()
@@ -25,8 +27,11 @@ class PortalAutomationController extends Controller
             ->get();
 
         $query = PropertySyncStatus::query()
-            ->with(['property', 'integration'])
-            ->whereHas('integration', fn ($query) => $query->where('slug', $portal));
+            ->with(['property', 'integration']);
+
+        if (! $allPortals) {
+            $query->whereHas('integration', fn ($query) => $query->where('slug', $portal));
+        }
 
         if ($status !== '' && $status !== 'all') {
             $query->where('sync_status', $status);
@@ -40,16 +45,20 @@ class PortalAutomationController extends Controller
             });
         }
 
-        $items = $query
+        $allItems = $query
             ->orderByRaw('COALESCE(last_attempt_at, last_synced_at, updated_at) DESC')
-            ->limit($limit)
             ->get()
             ->map(fn (PropertySyncStatus $sync) => $this->itemPayload($sync))
             ->filter(fn (array $item) => $action === 'all' || $item['action'] === $action)
             ->values();
 
+        $total = $allItems->count();
+        $lastPage = max(1, (int) ceil($total / $perPage));
+        $page = min($page, $lastPage);
+        $items = $allItems->forPage($page, $perPage)->values();
+
         return response()->json(['Datos' => [
-            'portal' => $portal,
+            'portal' => $allPortals ? 'all' : $portal,
             'config' => $this->configPayload($portal),
             'portals' => $integrations->map(fn (Integration $integration) => [
                 'id' => $integration->id,
@@ -58,7 +67,8 @@ class PortalAutomationController extends Controller
                 'description' => $integration->description,
                 'active' => $integration->active,
             ])->values(),
-            'summary' => $this->summaryPayload($items),
+            'summary' => $this->summaryPayload($allItems),
+            'pagination' => $this->paginationPayload($page, $perPage, $total),
             'items' => $items,
         ]]);
     }
@@ -141,8 +151,31 @@ class PortalAutomationController extends Controller
         ];
     }
 
+    protected function paginationPayload(int $page, int $perPage, int $total): array
+    {
+        $lastPage = max(1, (int) ceil($total / $perPage));
+
+        return [
+            'page' => $page,
+            'per_page' => $perPage,
+            'total' => $total,
+            'last_page' => $lastPage,
+            'from' => $total === 0 ? 0 : (($page - 1) * $perPage) + 1,
+            'to' => $total === 0 ? 0 : min($total, $page * $perPage),
+        ];
+    }
+
     protected function configPayload(string $portal): array
     {
+        if ($portal === '' || $portal === 'all') {
+            return [
+                'auto_sync' => (bool) config('portals.ciencuadras.auto_sync'),
+                'limit' => (int) config('portals.ciencuadras.auto_sync_limit', 20),
+                'scan' => (int) config('portals.ciencuadras.auto_sync_scan', 500),
+                'schedule' => 'Ciencuadras auto-sync cada 5 minutos; verificación de pendientes cada minuto.',
+            ];
+        }
+
         if ($portal !== 'ciencuadras') {
             return [
                 'auto_sync' => false,

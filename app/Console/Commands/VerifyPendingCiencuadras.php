@@ -72,7 +72,7 @@ class VerifyPendingCiencuadras extends Command
             $status->fill([
                 'sync_status' => $syncStatus,
                 'external_id' => $externalCode,
-                'external_url' => $this->publicUrlForStatus($syncStatus, $targetStatus, $response, $status->external_url ?: $this->propertyWebUrl($code)),
+                'external_url' => $this->publicUrlForStatus($syncStatus, $targetStatus, $response, $status->external_url),
                 'last_response' => $response,
                 'last_error' => $error,
                 'last_attempt_at' => now(),
@@ -112,6 +112,10 @@ class VerifyPendingCiencuadras extends Command
         $propertyData = $propertyResult['data'] ?? null;
 
         if ($targetStatus === 'I' || $targetStatus === 'D' || $currentStatus === 'paused') {
+            if ($this->responseHasError($statusData)) {
+                return 'error';
+            }
+
             if ($this->responseIsPending($statusData)) {
                 return 'pending';
             }
@@ -120,11 +124,15 @@ class VerifyPendingCiencuadras extends Command
                 return 'paused';
             }
 
-            if ($this->responseHasError($statusData) || ! ($propertyResult['ok'] ?? false)) {
+            if (! ($propertyResult['ok'] ?? false)) {
                 return 'error';
             }
 
             return 'pending';
+        }
+
+        if ($this->responseHasError($statusData)) {
+            return 'error';
         }
 
         if ($this->responseHasSuccess($statusData) || $this->responseHasSuccess($propertyData)) {
@@ -139,7 +147,7 @@ class VerifyPendingCiencuadras extends Command
             return 'pending';
         }
 
-        if ($this->responseHasError($statusData) || $this->responseHasError($propertyData) || ! ($propertyResult['ok'] ?? false)) {
+        if ($this->responseHasError($propertyData) || ! ($propertyResult['ok'] ?? false)) {
             return 'error';
         }
 

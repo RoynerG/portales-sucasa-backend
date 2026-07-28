@@ -84,8 +84,7 @@ class CiencuadrasController extends Controller
                 $syncStatus,
                 $externalCode,
                 $response,
-                $syncStatus === 'error' ? $this->errorMessage($response) : null,
-                $webUrl
+                $syncStatus === 'error' ? $this->errorMessage($response) : null
             );
         }
 
@@ -97,7 +96,7 @@ class CiencuadrasController extends Controller
             'action' => $targetAction,
             'target_status' => $targetStatus,
             'sync_status' => $syncStatus,
-            'public_url' => $this->publicUrlForStatus($syncStatus, $targetStatus, $response, $webUrl),
+            'public_url' => $this->publicUrlForStatus($syncStatus, $targetStatus, $response),
             'web_url' => $webUrl,
             'response' => $response,
         ]]);
@@ -170,8 +169,7 @@ class CiencuadrasController extends Controller
             $syncStatus,
             $consultCode,
             $response,
-            $syncStatus === 'error' ? $this->errorMessage($response) : null,
-            $webUrl
+            $syncStatus === 'error' ? $this->errorMessage($response) : null
         );
 
         if ($syncStatus === 'synced') {
@@ -186,7 +184,7 @@ class CiencuadrasController extends Controller
             'target_status' => $status,
             'sync_status' => $syncStatus,
             'id_request' => $idRequest,
-            'public_url' => $this->publicUrlForStatus($syncStatus, $status, $response, $webUrl),
+            'public_url' => $this->publicUrlForStatus($syncStatus, $status, $response),
             'web_url' => $webUrl,
             'response' => $response,
         ]]);
@@ -306,6 +304,10 @@ class CiencuadrasController extends Controller
         $propertyData = $propertyResult['data'] ?? null;
 
         if ($targetStatus === 'I' || $targetStatus === 'D' || $currentStatus === 'paused') {
+            if ($this->responseHasError($statusData)) {
+                return 'error';
+            }
+
             if ($this->responseIsPending($statusData)) {
                 return 'pending';
             }
@@ -319,11 +321,15 @@ class CiencuadrasController extends Controller
                 return 'paused';
             }
 
-            if ($this->responseHasError($statusData) || ! ($propertyResult['ok'] ?? false)) {
+            if (! ($propertyResult['ok'] ?? false)) {
                 return 'error';
             }
 
             return 'pending';
+        }
+
+        if ($this->responseHasError($statusData)) {
+            return 'error';
         }
 
         if ($this->responseHasSuccess($statusData) || $this->responseHasSuccess($propertyData)) {
@@ -338,7 +344,7 @@ class CiencuadrasController extends Controller
             return 'pending';
         }
 
-        if ($this->responseHasError($statusData) || $this->responseHasError($propertyData) || ! ($propertyResult['ok'] ?? false)) {
+        if ($this->responseHasError($propertyData) || ! ($propertyResult['ok'] ?? false)) {
             return 'error';
         }
 

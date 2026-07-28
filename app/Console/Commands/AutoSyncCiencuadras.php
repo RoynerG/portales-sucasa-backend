@@ -138,8 +138,7 @@ class AutoSyncCiencuadras extends Command
                     $syncStatus,
                     $externalCode,
                     $response,
-                    $syncStatus === 'error' ? $this->errorMessage($response) : null,
-                    $this->propertyWebUrl($code)
+                    $syncStatus === 'error' ? $this->errorMessage($response) : null
                 );
 
                 if ($syncStatus === 'synced') {
@@ -269,6 +268,11 @@ class AutoSyncCiencuadras extends Command
         }
 
         if ($targetStatus === 'I') {
+            $json = strtolower(json_encode($statusResult['data'] ?? $result['data'] ?? []));
+            if (str_contains($json, 'error') || str_contains($json, 'fall')) {
+                return 'error';
+            }
+
             if ($this->responseIsPending($statusResult['data'] ?? null)) {
                 return 'pending';
             }
@@ -284,13 +288,13 @@ class AutoSyncCiencuadras extends Command
             return 'pending';
         }
 
-        if ($this->responseHasSuccess($statusResult['data'] ?? null) || $this->responseHasSuccess($propertyResult['data'] ?? null)) {
-            return 'synced';
-        }
-
         $json = strtolower(json_encode($statusResult['data'] ?? $result['data'] ?? []));
         if (str_contains($json, 'error') || str_contains($json, 'fall')) {
             return 'error';
+        }
+
+        if ($this->responseHasSuccess($statusResult['data'] ?? null) || $this->responseHasSuccess($propertyResult['data'] ?? null)) {
+            return 'synced';
         }
 
         if (str_contains($json, 'pending')) {

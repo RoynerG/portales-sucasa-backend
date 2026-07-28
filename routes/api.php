@@ -11,6 +11,7 @@ use App\Http\Controllers\Portal\CiencuadrasController;
 use App\Http\Controllers\Portal\CiencuadrasMappingController;
 use App\Http\Controllers\Portal\FincaraizController;
 use App\Http\Controllers\Portal\MercadoLibreController;
+use App\Http\Controllers\Portal\PortalAutomationController;
 use App\Http\Controllers\Portal\PortalErrorController;
 use App\Http\Controllers\Portal\ProppitController;
 use App\Http\Controllers\Portal\XmlController;
@@ -66,6 +67,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/properties/{code}/mercadolibre/verify', [MercadoLibreController::class, 'verify']);
 
         Route::get('/fincaraiz/client', [FincaraizController::class, 'clientInfo']);
+        Route::get('/automation', [PortalAutomationController::class, 'index']);
         Route::get('/errors', [PortalErrorController::class, 'index']);
         Route::post('/properties/{code}/fincaraiz/publish', [FincaraizController::class, 'publish']);
         Route::post('/properties/{code}/fincaraiz/update', [FincaraizController::class, 'update']);

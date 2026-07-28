@@ -55,23 +55,18 @@ class VerifyPendingCiencuadras extends Command
             $externalCode = $mapper->lookupCode($status->external_id ?: $code);
             $lastResponse = $status->last_response ?? [];
             $idRequest = $client->extractIdRequest($lastResponse);
-            $targetStatus = $lastResponse['target_status'] ?? null;
+            $targetStatus = $this->responseValue($lastResponse, 'target_status');
+            $targetAction = $this->responseValue($lastResponse, 'target_action');
 
             $statusResult = $idRequest
                 ? $client->consultStatus(['idRequest' => $idRequest], $credential)
                 : null;
             $propertyResult = $client->consultProperty($externalCode, $credential);
 
-            $response = [
-                'previous' => $lastResponse,
-                'target_action' => $lastResponse['target_action'] ?? null,
-                'target_status' => $targetStatus,
-                'status_check' => $statusResult['data'] ?? null,
-                'property_check' => $propertyResult['data'] ?? null,
-            ];
+            $response = $this->verificationResponse($idRequest, $targetAction, $targetStatus, $statusResult['data'] ?? null, $propertyResult['data'] ?? null);
             $syncStatus = $this->syncState($statusResult, $propertyResult, $status->sync_status, $targetStatus);
             $error = $syncStatus === 'error'
-                ? substr(json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 0, 2000)
+                ? $this->errorMessage($response)
                 : null;
 
             $status->fill([
@@ -216,6 +211,34 @@ class VerifyPendingCiencuadras extends Command
         }
 
         return $this->extractPublicUrl($response) ?: $fallbackUrl;
+    }
+
+    protected function verificationResponse(?string $idRequest, mixed $targetAction, mixed $targetStatus, mixed $statusData, mixed $propertyData): array
+    {
+        return [
+            'idRequest' => $idRequest,
+            'target_action' => is_scalar($targetAction) ? (string) $targetAction : null,
+            'target_status' => is_scalar($targetStatus) ? (string) $targetStatus : null,
+            'status_check' => $statusData,
+            'property_check' => $propertyData,
+            'checked_at' => now()->toISOString(),
+        ];
+    }
+
+    protected function responseValue(array $response, string $key): mixed
+    {
+        if (array_key_exists($key, $response)) {
+            return $response[$key];
+        }
+
+        $previous = $response['previous'] ?? null;
+
+        return is_array($previous) ? $this->responseValue($previous, $key) : null;
+    }
+
+    protected function errorMessage(array $response): string
+    {
+        return substr(json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE), 0, 2000);
     }
 
     protected function propertyWebUrl(string $code): string

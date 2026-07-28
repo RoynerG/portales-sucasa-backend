@@ -66,21 +66,15 @@ class CiencuadrasController extends Controller
 
         $lastResponse = $status?->last_response ?? [];
         $idRequest = $this->cc->extractIdRequest($lastResponse);
-        $targetStatus = $lastResponse['target_status'] ?? null;
-        $targetAction = $lastResponse['target_action'] ?? null;
+        $targetStatus = $this->responseValue($lastResponse, 'target_status');
+        $targetAction = $this->responseValue($lastResponse, 'target_action');
         $statusResult = $idRequest
             ? $this->cc->consultStatus(['idRequest' => $idRequest], $cred)
             : null;
         $consultCode = $this->consultCodeForStatus($status, $externalCode);
         $propertyResult = $this->cc->consultProperty($consultCode, $cred);
 
-        $response = [
-            'previous' => $lastResponse,
-            'target_action' => $targetAction,
-            'target_status' => $targetStatus,
-            'status_check' => $statusResult['data'] ?? null,
-            'property_check' => $propertyResult['data'] ?? null,
-        ];
+        $response = $this->verificationResponse($idRequest, $targetAction, $targetStatus, $statusResult['data'] ?? null, $propertyResult['data'] ?? null);
         $syncStatus = $this->verifiedSyncState($statusResult, $propertyResult, $status?->sync_status, $targetStatus);
         $webUrl = $this->propertyWebUrl($code);
 
@@ -470,8 +464,31 @@ class CiencuadrasController extends Controller
         return 'https://sucasainmobiliaria.com.co/inmuebles/inmueble-' . rawurlencode($code);
     }
 
+    protected function verificationResponse(?string $idRequest, mixed $targetAction, mixed $targetStatus, mixed $statusData, mixed $propertyData): array
+    {
+        return [
+            'idRequest' => $idRequest,
+            'target_action' => is_scalar($targetAction) ? (string) $targetAction : null,
+            'target_status' => is_scalar($targetStatus) ? (string) $targetStatus : null,
+            'status_check' => $statusData,
+            'property_check' => $propertyData,
+            'checked_at' => now()->toISOString(),
+        ];
+    }
+
+    protected function responseValue(array $response, string $key): mixed
+    {
+        if (array_key_exists($key, $response)) {
+            return $response[$key];
+        }
+
+        $previous = $response['previous'] ?? null;
+
+        return is_array($previous) ? $this->responseValue($previous, $key) : null;
+    }
+
     protected function errorMessage(array $response): string
     {
-        return substr(json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), 0, 2000);
+        return substr(json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE), 0, 2000);
     }
 }

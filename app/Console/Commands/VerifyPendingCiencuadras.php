@@ -200,13 +200,17 @@ class VerifyPendingCiencuadras extends Command
 
     protected function extractPublicUrl(array $response): ?string
     {
-        $json = json_encode($response);
-        if (! $json) {
-            return null;
-        }
+        foreach ($response as $value) {
+            if (is_scalar($value)) {
+                $text = str_replace('\\/', '/', (string) $value);
+                if (preg_match('/https?:\/\/(?:pre\.)?ciencuadras\.com\/inmueble\/[^\s"]*/i', $text, $matches)) {
+                    return rtrim($matches[0], '\\');
+                }
+            }
 
-        if (preg_match('/https?:\\\\?\\/\\\\?\\/[^"\\s]+ciencuadras\\.com[^"\\s]*/i', $json, $matches)) {
-            return str_replace('\\/', '/', $matches[0]);
+            if (is_array($value) && $found = $this->extractPublicUrl($value)) {
+                return $found;
+            }
         }
 
         return null;

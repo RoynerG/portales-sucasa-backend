@@ -19,6 +19,8 @@ class AutoSyncCiencuadras extends Command
     protected $signature = 'ciencuadras:auto-sync
         {--limit= : Cantidad máxima de acciones a ejecutar}
         {--scan= : Cantidad máxima de inmuebles WP a revisar}
+        {--code=* : Código(s) específicos a procesar}
+        {--retry-errors : Reintenta inmuebles en error si siguen públicos en WordPress}
         {--dry-run : Solo muestra qué haría, sin enviar a Ciencuadras}
         {--force : Ejecuta aunque CIENCUADRAS_AUTO_SYNC esté apagado}';
 
@@ -47,12 +49,40 @@ class AutoSyncCiencuadras extends Command
             return self::FAILURE;
         }
 
-        $rows = DB::connection('wordpress')
+        $codes = collect((array) $this->option('code'))
+            ->map(fn ($code) => trim((string) $code))
+            ->filter()
+            ->unique()
+            ->values();
+
+        $rowsQuery = DB::connection('wordpress')
             ->table('wp_jet_cct_inmuebles')
-            ->where('cct_status', 'publish')
-            ->orderByDesc('cct_modified')
-            ->limit($scan)
-            ->get();
+            ->select(['codigo', 'estado', 'fecha_actualizacion', 'cct_modified'])
+            ->where('cct_status', 'publish');
+
+        if ($codes->isNotEmpty()) {
+            $rowsQuery->whereIn('codigo', $codes->all());
+        } else {
+            $rowsQuery->orderByDesc('cct_modified')->limit($scan);
+        }
+
+        $rows = $rowsQuery->get();
+        $rowCodes = $rows
+            ->pluck('codigo')
+            ->map(fn ($code) => (string) $code)
+            ->filter()
+            ->unique()
+            ->values();
+        $properties = Property::query()
+            ->whereIn('code', $rowCodes->all())
+            ->get()
+            ->keyBy(fn (Property $property) => (string) $property->code);
+        $syncs = PropertySyncStatus::query()
+            ->whereIn('property_id', $properties->pluck('id')->all())
+            ->where('integration_id', $integration->id)
+            ->where('environment', config('portals.ciencuadras.environment'))
+            ->get()
+            ->keyBy('property_id');
 
         $executed = 0;
         $summary = ['publish' => 0, 'update' => 0, 'pause' => 0, 'skipped' => 0, 'error' => 0];
@@ -68,15 +98,10 @@ class AutoSyncCiencuadras extends Command
                 continue;
             }
 
-            $property = Property::where('code', $code)->first();
-            $sync = $property
-                ? PropertySyncStatus::where('property_id', $property->id)
-                    ->where('integration_id', $integration->id)
-                    ->where('environment', config('portals.ciencuadras.environment'))
-                    ->first()
-                : null;
+            $property = $properties->get($code);
+            $sync = $property ? $syncs->get($property->id) : null;
 
-            $decision = $this->decision($row, $sync);
+            $decision = $this->decision($row, $sync, (bool) $this->option('retry-errors'));
             if (! $decision) {
                 $summary['skipped']++;
                 continue;
@@ -158,7 +183,7 @@ class AutoSyncCiencuadras extends Command
         return self::SUCCESS;
     }
 
-    protected function decision(stdClass $row, ?PropertySyncStatus $sync): ?array
+    protected function decision(stdClass $row, ?PropertySyncStatus $sync, bool $retryErrors = false): ?array
     {
         $isPublic = $this->isPublicStatus($row->estado);
         $current = $sync?->sync_status;
@@ -176,7 +201,7 @@ class AutoSyncCiencuadras extends Command
                 return ['update', 'A'];
             }
 
-            if ($current === 'error' && ((int) $sync->attempts) < 3) {
+            if ($current === 'error' && ($retryErrors || ((int) $sync->attempts) < 3)) {
                 return ['publish', 'A'];
             }
 
@@ -341,13 +366,17 @@ class AutoSyncCiencuadras extends Command
 
     protected function extractPublicUrl(array $response): ?string
     {
-        $json = json_encode($response);
-        if (! $json) {
-            return null;
-        }
+        foreach ($response as $value) {
+            if (is_scalar($value)) {
+                $text = str_replace('\\/', '/', (string) $value);
+                if (preg_match('/https?:\/\/(?:pre\.)?ciencuadras\.com\/inmueble\/[^\s"]*/i', $text, $matches)) {
+                    return rtrim($matches[0], '\\');
+                }
+            }
 
-        if (preg_match('/https?:\\\\?\\/\\\\?\\/[^"\\s]+ciencuadras\\.com[^"\\s]*/i', $json, $matches)) {
-            return str_replace('\\/', '/', $matches[0]);
+            if (is_array($value) && $found = $this->extractPublicUrl($value)) {
+                return $found;
+            }
         }
 
         return null;

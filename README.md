@@ -182,19 +182,13 @@ Abre `http://localhost:5173`. Login con `admin@sucasa.com` / `password`.
 El panel hace `fetch` a `http://localhost:8000/api/*` (configurado en `panel/.env.example`).
 Si Laravel corre en otro puerto/host, copia `panel/.env.example` a `panel/.env` y ajusta.
 
-## Generar feeds XML
+## Integraciones por API
 
-```bash
-# Google Sitemap
-php artisan portals:generate-feeds --portal=google
-```
-
-El archivo queda en `backend/storage/app/google/sitemap.xml`.
 Proppit ya no usa feed XML: publica, actualiza y despublica con la API real-time v2.
 
 ## Programar tareas automáticas (opcional)
 
-Para que el webhook de MercadoLibre refresque tokens o se regenere el sitemap de Google cada hora:
+Para que las tareas programadas del backend se ejecuten cada minuto:
 
 ```bash
 # Linux/macOS
@@ -215,8 +209,6 @@ cada minuto.
 ```
 backend/
 ├── app/
-│   ├── Console/Commands/
-│   │   └── GeneratePortalFeeds.php    # artisan portals:generate-feeds
 │   ├── Http/Controllers/
 │   │   ├── Auth/AuthController.php   # login/logout/me (Sanctum)
 │   │   ├── Api/                      # CRUD REST
@@ -230,10 +222,10 @@ backend/
 │   │       ├── MercadoLibreController.php
 │   │       ├── FincaraizController.php
 │   │       ├── CiencuadrasController.php
-│   │       └── XmlController.php
+│   │       └── ProppitController.php
 │   ├── Models/                       # Eloquent (10 modelos)
 │   ├── Providers/AppServiceProvider.php  # singletons de los clients
-│   └── Services/Portals/             # Lógica de integración (5 servicios)
+│   └── Services/Portals/             # Lógica de integración con portales
 ├── bootstrap/                        # app.php + providers.php (Laravel 11)
 ├── config/                           # app, database, auth, sanctum, portals, ...
 ├── database/
@@ -282,7 +274,6 @@ backend/
 | POST   | `/api/portals/properties/{code}/proppit/update` | sí | Actualizar en Proppit |
 | POST   | `/api/portals/properties/{code}/proppit/pause` | sí | Despublicar en Proppit |
 | POST   | `/api/portals/properties/{code}/proppit/verify` | sí | Verificar en Proppit |
-| POST   | `/api/portals/google/generate` | sí | Genera sitemap Google |
 
 ## Troubleshooting
 

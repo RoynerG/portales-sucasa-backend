@@ -4,7 +4,6 @@ namespace App\Providers;
 
 use App\Services\Portals\CiencuadrasClient;
 use App\Services\Portals\FincaraizClient;
-use App\Services\Portals\GoogleSitemapGenerator;
 use App\Services\Portals\MercadoLibreClient;
 use App\Services\Portals\ProppitClient;
 use GuzzleHttp\Client;
@@ -32,7 +31,6 @@ class AppServiceProvider extends ServiceProvider
             'http_errors' => true,
             'verify' => true,
         ])));
-        $this->app->singleton(GoogleSitemapGenerator::class);
     }
 
     public function boot(): void

@@ -661,13 +661,6 @@ mysqldump -u root -p sucasa_panel > backup_$(date +%Y%m%d).sql
 php artisan backup:run   # si instalás spatie/laravel-backup
 ```
 
-### Regenerar sitemap XML de Google
-```bash
-php artisan portals:generate-feeds
-```
-
----
-
 ## Próximo paso: importar tus datos reales
 
 Una vez que confirmes que la BD nueva funciona, podemos armar un script de

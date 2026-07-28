@@ -14,7 +14,6 @@ use App\Http\Controllers\Portal\MercadoLibreController;
 use App\Http\Controllers\Portal\PortalAutomationController;
 use App\Http\Controllers\Portal\PortalErrorController;
 use App\Http\Controllers\Portal\ProppitController;
-use App\Http\Controllers\Portal\XmlController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', fn () => response()->json(['Datos' => ['status' => 'ok', 'time' => now()]]));
@@ -92,7 +91,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/properties/{code}/proppit/pause', [ProppitController::class, 'pause']);
         Route::post('/properties/{code}/proppit/verify', [ProppitController::class, 'verify']);
 
-        Route::post('/google/generate', [XmlController::class, 'generateGoogle']);
     });
 });
 

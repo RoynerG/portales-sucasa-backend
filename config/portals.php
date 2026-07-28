@@ -43,9 +43,4 @@ return [
         'public_url' => env('PROPPIT_PUBLIC_URL'),
     ],
 
-    'google' => [
-        'sitemap_path'  => env('GOOGLE_SITEMAP_PATH', 'storage/app/google/sitemap.xml'),
-        'public_url'    => env('GOOGLE_SITEMAP_PUBLIC_URL'),
-    ],
-
 ];

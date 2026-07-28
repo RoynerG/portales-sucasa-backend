@@ -54,17 +54,6 @@ class IntegrationSeeder extends Seeder
                 'config_schema' => ['fields' => ['user', 'password', 'publisher_external_id']],
                 'order' => 4,
             ],
-            [
-                'name' => 'Google Sitemap',
-                'slug' => 'google',
-                'api_class' => 'App\\Services\\Portals\\GoogleSitemapGenerator',
-                'description' => 'Sitemap XML para indexar en Google Search.',
-                'icon' => 'fa-brands fa-google',
-                'color' => '#4285f4',
-                'website_url' => 'https://search.google.com/search-console',
-                'config_schema' => ['fields' => []],
-                'order' => 5,
-            ],
         ];
 
         foreach ($items as $item) {

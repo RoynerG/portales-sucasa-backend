@@ -15,3 +15,7 @@ Schedule::command('ciencuadras:verify-pending --limit=25')
 Schedule::command('ciencuadras:auto-sync')
     ->everyFiveMinutes()
     ->withoutOverlapping();
+
+Schedule::command('ciencuadras:reconcile-active')
+    ->everyTenMinutes()
+    ->withoutOverlapping();

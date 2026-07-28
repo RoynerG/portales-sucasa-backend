@@ -267,12 +267,8 @@ class CiencuadrasController extends Controller
                 return 'pending';
             }
 
-            if (
-                $this->responseHasSuccess($statusResult['data'] ?? null)
-                || $this->responseHasNotFound($statusResult['data'] ?? null)
-                || $this->responseHasInactive($propertyResult['data'] ?? null)
-                || $this->responseHasNotFound($propertyResult['data'] ?? null)
-            ) {
+            if ($this->responseHasInactive($propertyResult['data'] ?? null)
+                || $this->responseHasNotFound($propertyResult['data'] ?? null)) {
                 return 'paused';
             }
 
@@ -287,15 +283,21 @@ class CiencuadrasController extends Controller
             return 'error';
         }
 
-        if ($this->responseHasSuccess($propertyResult['data'] ?? null)) {
+        if ($this->responseHasActive($propertyResult['data'] ?? null)) {
             return 'synced';
         }
 
-        if (str_contains($json, 'pending')) {
+        if ($this->responseIsPending($statusResult['data'] ?? null)
+            || $this->responseHasSuccess($statusResult['data'] ?? null)
+            || $this->responseHasNotFound($propertyResult['data'] ?? null)) {
             return 'pending';
         }
 
-        return 'synced';
+        if ($this->responseHasInactive($propertyResult['data'] ?? null)) {
+            return 'error';
+        }
+
+        return 'pending';
     }
 
     protected function verifiedSyncState(?array $statusResult, array $propertyResult, ?string $currentStatus, ?string $targetStatus = null): string
@@ -312,12 +314,8 @@ class CiencuadrasController extends Controller
                 return 'pending';
             }
 
-            if (
-                $this->responseHasSuccess($statusData)
-                || $this->responseHasNotFound($statusData)
-                || $this->responseHasInactive($propertyData)
-                || $this->responseHasNotFound($propertyData)
-            ) {
+            if ($this->responseHasInactive($propertyData)
+                || $this->responseHasNotFound($propertyData)) {
                 return 'paused';
             }
 
@@ -332,23 +330,25 @@ class CiencuadrasController extends Controller
             return 'error';
         }
 
-        if ($this->responseHasSuccess($statusData) || $this->responseHasSuccess($propertyData)) {
+        if ($this->responseHasActive($propertyData)) {
             return 'synced';
         }
 
-        if ($this->responseIsPending($statusData)) {
+        if ($this->responseIsPending($statusData)
+            || $this->responseHasSuccess($statusData)
+            || $this->responseHasNotFound($propertyData)) {
             return 'pending';
         }
 
-        if ($this->responseHasNotFound($propertyData) && $currentStatus === 'pending') {
-            return 'pending';
+        if ($this->responseHasInactive($propertyData)) {
+            return 'error';
         }
 
         if ($this->responseHasError($propertyData) || ! ($propertyResult['ok'] ?? false)) {
             return 'error';
         }
 
-        return $currentStatus ?: 'pending';
+        return 'pending';
     }
 
     protected function consultCodeForStatus(?PropertySyncStatus $status, string $default): string
@@ -414,6 +414,15 @@ class CiencuadrasController extends Controller
             || str_contains($json, 'exito');
     }
 
+    protected function responseHasActive($data): bool
+    {
+        $json = strtolower(json_encode($data ?? []));
+
+        return ! $this->responseHasInactive($data)
+            && (str_contains($json, '"active":"activo"')
+                || str_contains($json, '"status":"0"'));
+    }
+
     protected function responseHasError($data): bool
     {
         $json = strtolower(json_encode($data ?? []));
@@ -462,7 +471,7 @@ class CiencuadrasController extends Controller
 
     protected function publicUrlForStatus(string $syncStatus, ?string $targetStatus, array $response, ?string $fallbackUrl = null): ?string
     {
-        if ($syncStatus === 'paused' || in_array($targetStatus, ['I', 'D'], true)) {
+        if (in_array($syncStatus, ['paused', 'not_synced'], true) || in_array($targetStatus, ['I', 'D'], true)) {
             return null;
         }
 

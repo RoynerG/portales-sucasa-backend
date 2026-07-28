@@ -29,6 +29,7 @@ return [
         'auto_sync' => env('CIENCUADRAS_AUTO_SYNC', false),
         'auto_sync_limit' => env('CIENCUADRAS_AUTO_SYNC_LIMIT', 20),
         'auto_sync_scan' => env('CIENCUADRAS_AUTO_SYNC_SCAN', 500),
+        'verify_max_attempts' => env('CIENCUADRAS_VERIFY_MAX_ATTEMPTS', 30),
     ],
 
     'proppit' => [

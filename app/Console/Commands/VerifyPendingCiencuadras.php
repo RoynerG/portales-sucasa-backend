@@ -43,7 +43,7 @@ class VerifyPendingCiencuadras extends Command
             return self::FAILURE;
         }
 
-        $summary = ['synced' => 0, 'pending' => 0, 'error' => 0, 'skipped' => 0];
+        $summary = ['synced' => 0, 'pending' => 0, 'not_synced' => 0, 'error' => 0, 'skipped' => 0];
 
         foreach ($pending as $status) {
             if (! $status->property) {
@@ -64,10 +64,18 @@ class VerifyPendingCiencuadras extends Command
             $propertyResult = $client->consultProperty($externalCode, $credential);
 
             $response = $this->verificationResponse($idRequest, $targetAction, $targetStatus, $statusResult['data'] ?? null, $propertyResult['data'] ?? null);
-            $syncStatus = $this->syncState($statusResult, $propertyResult, $status->sync_status, $targetStatus);
-            $error = $syncStatus === 'error'
-                ? $this->errorMessage($response)
-                : null;
+            $syncStatus = $this->syncState(
+                $statusResult,
+                $propertyResult,
+                $status->sync_status,
+                $targetStatus,
+                (int) $status->attempts
+            );
+            $error = match ($syncStatus) {
+                'error' => $this->errorMessage($response),
+                'not_synced' => 'Ciencuadras terminó de procesar la solicitud, pero el inmueble no aparece activo. Se enviará nuevamente.',
+                default => null,
+            };
 
             $status->fill([
                 'sync_status' => $syncStatus,
@@ -89,7 +97,7 @@ class VerifyPendingCiencuadras extends Command
             $this->line("{$code}: {$syncStatus}");
         }
 
-        $this->info("Listo. Publicados: {$summary['synced']} | Pendientes: {$summary['pending']} | Errores: {$summary['error']} | Omitidos: {$summary['skipped']}");
+        $this->info("Listo. Publicados: {$summary['synced']} | Pendientes: {$summary['pending']} | Por reenviar: {$summary['not_synced']} | Errores: {$summary['error']} | Omitidos: {$summary['skipped']}");
 
         return self::SUCCESS;
     }
@@ -106,7 +114,13 @@ class VerifyPendingCiencuadras extends Command
         return $token ? new PortalCredential(['access_token' => $token]) : null;
     }
 
-    protected function syncState(?array $statusResult, array $propertyResult, ?string $currentStatus, ?string $targetStatus = null): string
+    protected function syncState(
+        ?array $statusResult,
+        array $propertyResult,
+        ?string $currentStatus,
+        ?string $targetStatus = null,
+        int $attempts = 0
+    ): string
     {
         $statusData = $statusResult['data'] ?? null;
         $propertyData = $propertyResult['data'] ?? null;
@@ -120,7 +134,7 @@ class VerifyPendingCiencuadras extends Command
                 return 'pending';
             }
 
-            if ($this->responseHasSuccess($statusData) || $this->responseHasInactive($propertyData) || $this->responseHasNotFound($propertyData)) {
+            if ($this->responseHasInactive($propertyData) || $this->responseHasNotFound($propertyData)) {
                 return 'paused';
             }
 
@@ -135,7 +149,7 @@ class VerifyPendingCiencuadras extends Command
             return 'error';
         }
 
-        if ($this->responseHasSuccess($statusData) || $this->responseHasSuccess($propertyData)) {
+        if ($this->responseHasActive($propertyData)) {
             return 'synced';
         }
 
@@ -143,15 +157,21 @@ class VerifyPendingCiencuadras extends Command
             return 'pending';
         }
 
-        if ($this->responseHasNotFound($propertyData) && $currentStatus === 'pending') {
-            return 'pending';
+        if ($this->responseHasNotFound($propertyData)) {
+            return ($attempts + 1) >= (int) config('portals.ciencuadras.verify_max_attempts', 30)
+                ? 'not_synced'
+                : 'pending';
+        }
+
+        if ($this->responseHasInactive($propertyData)) {
+            return 'error';
         }
 
         if ($this->responseHasError($propertyData) || ! ($propertyResult['ok'] ?? false)) {
             return 'error';
         }
 
-        return $currentStatus ?: 'pending';
+        return 'pending';
     }
 
     protected function responseIsPending($data): bool
@@ -168,6 +188,15 @@ class VerifyPendingCiencuadras extends Command
             || str_contains($json, 'procesado')
             || str_contains($json, 'éxito')
             || str_contains($json, 'exito');
+    }
+
+    protected function responseHasActive($data): bool
+    {
+        $json = strtolower(json_encode($data ?? []));
+
+        return ! $this->responseHasInactive($data)
+            && (str_contains($json, '"active":"activo"')
+                || str_contains($json, '"status":"0"'));
     }
 
     protected function responseHasError($data): bool
@@ -218,7 +247,7 @@ class VerifyPendingCiencuadras extends Command
 
     protected function publicUrlForStatus(string $syncStatus, ?string $targetStatus, array $response, ?string $fallbackUrl = null): ?string
     {
-        if ($syncStatus === 'paused' || in_array($targetStatus, ['I', 'D'], true)) {
+        if (in_array($syncStatus, ['paused', 'not_synced'], true) || in_array($targetStatus, ['I', 'D'], true)) {
             return null;
         }
 

@@ -48,6 +48,11 @@ class CiencuadrasClient
         return $this->request('POST', '/api/consult-status', $payload, $cred);
     }
 
+    public function consultAllProperties(PortalCredential $cred): array
+    {
+        return $this->request('POST', '/api/consult-all-properties', [], $cred);
+    }
+
     public function updateProperty(array $payload, PortalCredential $cred): array
     {
         return $this->request('POST', '/api/update', $this->propertyBatch($payload), $cred);

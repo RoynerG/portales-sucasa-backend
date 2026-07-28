@@ -302,11 +302,8 @@ class AutoSyncCiencuadras extends Command
                 return 'pending';
             }
 
-            if (
-                $this->responseHasSuccess($statusResult['data'] ?? null)
-                || $this->responseHasInactive($propertyResult['data'] ?? null)
-                || $this->responseHasNotFound($propertyResult['data'] ?? null)
-            ) {
+            if ($this->responseHasInactive($propertyResult['data'] ?? null)
+                || $this->responseHasNotFound($propertyResult['data'] ?? null)) {
                 return 'paused';
             }
 
@@ -318,15 +315,21 @@ class AutoSyncCiencuadras extends Command
             return 'error';
         }
 
-        if ($this->responseHasSuccess($statusResult['data'] ?? null) || $this->responseHasSuccess($propertyResult['data'] ?? null)) {
+        if ($this->responseHasActive($propertyResult['data'] ?? null)) {
             return 'synced';
         }
 
-        if (str_contains($json, 'pending')) {
+        if ($this->responseIsPending($statusResult['data'] ?? null)
+            || $this->responseHasSuccess($statusResult['data'] ?? null)
+            || $this->responseHasNotFound($propertyResult['data'] ?? null)) {
             return 'pending';
         }
 
-        return 'synced';
+        if ($this->responseHasInactive($propertyResult['data'] ?? null)) {
+            return 'error';
+        }
+
+        return 'pending';
     }
 
     protected function responseHasSuccess($data): bool
@@ -338,6 +341,15 @@ class AutoSyncCiencuadras extends Command
             || str_contains($json, 'procesado')
             || str_contains($json, 'éxito')
             || str_contains($json, 'exito');
+    }
+
+    protected function responseHasActive($data): bool
+    {
+        $json = strtolower(json_encode($data ?? []));
+
+        return ! $this->responseHasInactive($data)
+            && (str_contains($json, '"active":"activo"')
+                || str_contains($json, '"status":"0"'));
     }
 
     protected function responseIsPending($data): bool

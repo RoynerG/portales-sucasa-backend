@@ -6,11 +6,16 @@ use App\Http\Controllers\Controller;
 use App\Models\Integration;
 use App\Models\PropertySyncStatus;
 use App\Services\PortalErrorSummarizer;
+use App\Services\Portals\CiencuadrasActiveProperties;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class PortalAutomationController extends Controller
 {
+    public function __construct(
+        protected CiencuadrasActiveProperties $ciencuadrasActiveProperties,
+    ) {}
+
     public function index(Request $request): JsonResponse
     {
         $portal = trim((string) $request->query('portal', 'all'));
@@ -68,7 +73,7 @@ class PortalAutomationController extends Controller
                 'description' => $integration->description,
                 'active' => $integration->active,
             ])->values(),
-            'summary' => $this->summaryPayload($allItems),
+            'summary' => $this->summaryPayload($allItems, $portal),
             'pagination' => $this->paginationPayload($page, $perPage, $total),
             'items' => $items,
         ]]);
@@ -136,14 +141,33 @@ class PortalAutomationController extends Controller
         ][$action] ?? 'Operación';
     }
 
-    protected function summaryPayload($items): array
+    protected function summaryPayload($items, string $portal): array
     {
         $items = collect($items);
+        $localSynced = $items->where('sync_status', 'synced')->count();
+        $synced = $localSynced;
+        $portalActive = null;
+
+        if ($portal === '' || $portal === 'all' || $portal === 'ciencuadras') {
+            $activeCodes = $this->ciencuadrasActiveProperties->sourceCodes();
+
+            if ($activeCodes !== null) {
+                $portalActive = $activeCodes->count();
+                $otherPortalSynced = $items
+                    ->where('sync_status', 'synced')
+                    ->where('portal', '!=', 'ciencuadras')
+                    ->count();
+                $synced = $portalActive + $otherPortalSynced;
+            }
+        }
 
         return [
             'total' => $items->count(),
             'active' => $items->whereIn('sync_status', ['pending', 'syncing'])->count(),
-            'synced' => $items->where('sync_status', 'synced')->count(),
+            'synced' => $synced,
+            'synced_local' => $localSynced,
+            'portal_active' => $portalActive,
+            'unconfirmed' => $portalActive === null ? 0 : max(0, $localSynced - $synced),
             'paused' => $items->where('sync_status', 'paused')->count(),
             'error' => $items->where('sync_status', 'error')->count(),
             'publish' => $items->where('action', 'publish')->count(),

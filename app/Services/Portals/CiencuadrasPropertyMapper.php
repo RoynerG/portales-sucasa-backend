@@ -50,7 +50,7 @@ class CiencuadrasPropertyMapper
         $prefix = (string) config('portals.ciencuadras.property_code_prefix');
         $portalCode = $this->portalPropertyCode($code);
 
-        return $prefix === '' ? $portalCode : $prefix . 'P' . $portalCode;
+        return $prefix === '' ? $portalCode : $prefix . $portalCode;
     }
 
     public function portalPropertyCode(string $code): string

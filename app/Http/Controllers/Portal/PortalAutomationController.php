@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Portal;
 use App\Http\Controllers\Controller;
 use App\Models\Integration;
 use App\Models\PropertySyncStatus;
+use App\Services\PortalErrorSummarizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -91,6 +92,7 @@ class PortalAutomationController extends Controller
             'external_url' => $sync->external_url,
             'last_error' => $sync->last_error,
             'last_response' => $response,
+            'error_summary' => app(PortalErrorSummarizer::class)->summarize($sync->last_error, $response, $sync->sync_status),
             'last_attempt_at' => $sync->last_attempt_at?->toIso8601String(),
             'last_synced_at' => $sync->last_synced_at?->toIso8601String(),
             'attempts' => $sync->attempts,

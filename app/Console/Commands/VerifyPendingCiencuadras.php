@@ -6,6 +6,7 @@ use App\Models\Integration;
 use App\Models\PortalCredential;
 use App\Models\PropertySyncStatus;
 use App\Services\Portals\CiencuadrasClient;
+use App\Services\Portals\CiencuadrasPropertyMapper;
 use Illuminate\Console\Command;
 
 class VerifyPendingCiencuadras extends Command
@@ -14,7 +15,7 @@ class VerifyPendingCiencuadras extends Command
 
     protected $description = 'Verifica automáticamente inmuebles pendientes de Ciencuadras y actualiza su estado.';
 
-    public function handle(CiencuadrasClient $client): int
+    public function handle(CiencuadrasClient $client, CiencuadrasPropertyMapper $mapper): int
     {
         $integration = Integration::where('slug', 'ciencuadras')->first();
         if (! $integration) {
@@ -51,7 +52,7 @@ class VerifyPendingCiencuadras extends Command
             }
 
             $code = (string) $status->property->code;
-            $externalCode = $this->lookupCode($status->external_id ?: $code);
+            $externalCode = $mapper->lookupCode($status->external_id ?: $code);
             $lastResponse = $status->last_response ?? [];
             $idRequest = $client->extractIdRequest($lastResponse);
             $targetStatus = $lastResponse['target_status'] ?? null;
@@ -215,22 +216,6 @@ class VerifyPendingCiencuadras extends Command
         }
 
         return $this->extractPublicUrl($response) ?: $fallbackUrl;
-    }
-
-    protected function lookupCode(string $code): string
-    {
-        $prefix = (string) config('portals.ciencuadras.property_code_prefix');
-        $code = trim($code);
-
-        while ($prefix !== '' && str_starts_with($code, $prefix)) {
-            $code = substr($code, strlen($prefix));
-        }
-
-        if ($prefix !== '' && str_contains($code, $prefix)) {
-            $code = substr($code, strrpos($code, $prefix) + strlen($prefix));
-        }
-
-        return $prefix === '' ? $code : $prefix . $code;
     }
 
     protected function propertyWebUrl(string $code): string

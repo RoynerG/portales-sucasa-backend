@@ -117,7 +117,7 @@ class AutoSyncCiencuadras extends Command
                 $statusResult = $idRequest
                     ? $client->consultStatus(['idRequest' => $idRequest], $credential)
                     : null;
-                $externalCode = $this->lookupCode($mapped['payload']['propertyCode']);
+                $externalCode = $mapper->lookupCode($mapped['payload']['propertyCode']);
                 $propertyResult = $result['ok']
                     ? $client->consultProperty($externalCode, $credential)
                     : null;
@@ -356,22 +356,6 @@ class AutoSyncCiencuadras extends Command
         }
 
         return $this->extractPublicUrl($response) ?: $fallbackUrl;
-    }
-
-    protected function lookupCode(string $code): string
-    {
-        $prefix = (string) config('portals.ciencuadras.property_code_prefix');
-        $code = trim($code);
-
-        while ($prefix !== '' && str_starts_with($code, $prefix)) {
-            $code = substr($code, strlen($prefix));
-        }
-
-        if ($prefix !== '' && str_contains($code, $prefix)) {
-            $code = substr($code, strrpos($code, $prefix) + strlen($prefix));
-        }
-
-        return $prefix === '' ? $code : $prefix . $code;
     }
 
     protected function propertyWebUrl(string $code): string

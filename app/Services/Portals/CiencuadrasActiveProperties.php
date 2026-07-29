@@ -67,7 +67,11 @@ class CiencuadrasActiveProperties
 
     protected function inventory(bool $fresh = false): ?Collection
     {
-        $cacheKey = 'ciencuadras.properties-inventory.'.config('portals.ciencuadras.environment');
+        $environment = config('portals.ciencuadras.environment');
+        $oldCacheKey = 'ciencuadras.properties-inventory.'.$environment;
+        $cacheKey = 'ciencuadras.clean-properties-inventory.'.$environment;
+
+        Cache::forget($oldCacheKey);
 
         if ($fresh) {
             Cache::forget($cacheKey);

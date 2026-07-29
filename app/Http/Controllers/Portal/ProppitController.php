@@ -9,6 +9,7 @@ use App\Models\Property;
 use App\Models\PropertySyncStatus;
 use App\Services\Portals\ProppitClient;
 use App\Services\Portals\ProppitPropertyMapper;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -137,7 +138,14 @@ class ProppitController extends Controller
             && hash_equals($storedFingerprint, $fingerprint);
 
         if (! $forceRefresh && $credential && ! $credential->isExpired() && $matchesCurrentCredentials) {
-            return $credential;
+            try {
+                if ($credential->access_token) {
+                    return $credential;
+                }
+            } catch (DecryptException) {
+                // La fila fue guardada en texto plano o con otra APP_KEY.
+                // Se reemplaza después de obtener un token nuevo.
+            }
         }
 
         $result = $this->proppit->token(['user' => $user, 'password' => $password]);
@@ -146,20 +154,23 @@ class ProppitController extends Controller
 
         $expiration = (int) ($result['data']['expiration'] ?? 0);
 
-        return PortalCredential::updateOrCreate(
-            ['user_id' => $request->user()->id, 'integration_id' => $this->integration()->id],
-            [
-                'access_token' => $token,
-                'access_token_expires_at' => $expiration > 0 ? now()->setTimestamp($expiration) : now()->addMinutes(55),
-                'data' => [
-                    'user' => $user,
-                    'credential_fingerprint' => $fingerprint,
-                    'country' => config('portals.proppit.country'),
-                    'publisher_external_id' => config('portals.proppit.publisher_external_id'),
-                    'api_url' => config('portals.proppit.api_url'),
-                ],
-            ]
-        );
+        if ($credential) {
+            PortalCredential::query()->whereKey($credential->getKey())->delete();
+        }
+
+        return PortalCredential::create([
+            'user_id' => $request->user()->id,
+            'integration_id' => $this->integration()->id,
+            'access_token' => $token,
+            'access_token_expires_at' => $expiration > 0 ? now()->setTimestamp($expiration) : now()->addMinutes(55),
+            'data' => [
+                'user' => $user,
+                'credential_fingerprint' => $fingerprint,
+                'country' => config('portals.proppit.country'),
+                'publisher_external_id' => config('portals.proppit.publisher_external_id'),
+                'api_url' => config('portals.proppit.api_url'),
+            ],
+        ]);
     }
 
     protected function saveStatus(Property $property, string $syncStatus, string $externalId, array $response, ?string $error): void

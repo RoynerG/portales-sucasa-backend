@@ -147,11 +147,9 @@ class PortalAutomationController extends Controller
         $localSynced = $items->where('sync_status', 'synced')->count();
         $synced = $localSynced;
         $portalActive = null;
-        $legacyCodes = null;
 
         if ($portal === '' || $portal === 'all' || $portal === 'ciencuadras') {
             $activeCodes = $this->ciencuadrasActiveProperties->sourceCodes();
-            $legacyCodes = $this->ciencuadrasActiveProperties->legacySourceCodes();
 
             if ($activeCodes !== null) {
                 $portalActive = $activeCodes->count();
@@ -169,7 +167,6 @@ class PortalAutomationController extends Controller
             'synced' => $synced,
             'synced_local' => $localSynced,
             'portal_active' => $portalActive,
-            'legacy_codes' => $legacyCodes?->count(),
             'unconfirmed' => $portalActive === null ? 0 : max(0, $localSynced - $synced),
             'paused' => $items->where('sync_status', 'paused')->count(),
             'error' => $items->where('sync_status', 'error')->count(),

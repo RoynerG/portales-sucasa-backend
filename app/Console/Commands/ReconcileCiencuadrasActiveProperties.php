@@ -30,11 +30,6 @@ class ReconcileCiencuadrasActiveProperties extends Command
             $this->error('No fue posible consultar los inmuebles activos de Ciencuadras.');
             return self::FAILURE;
         }
-        $legacyBySourceCode = $activeProperties->legacyCodes()
-            ?->mapWithKeys(fn (string $portalCode) => [
-                $activeProperties->sourceCode($portalCode) => $portalCode,
-            ]) ?? collect();
-
         $activeBySourceCode = $portalCodes
             ->mapWithKeys(fn (string $portalCode) => [
                 $activeProperties->sourceCode($portalCode) => $portalCode,
@@ -76,7 +71,6 @@ class ReconcileCiencuadrasActiveProperties extends Command
         foreach ($statuses as $status) {
             $code = (string) $status->property->code;
             $portalCode = $activeBySourceCode->get($code);
-            $legacyPortalCode = $legacyBySourceCode->get($code);
             $wpRow = $wpStates->get($code);
             $isPublic = $this->isPublicInWordPress($wpRow);
             $recentlySent = $status->last_attempt_at
@@ -85,9 +79,6 @@ class ReconcileCiencuadrasActiveProperties extends Command
             if ($portalCode) {
                 $nextStatus = 'synced';
                 $summary['active']++;
-            } elseif ($legacyPortalCode) {
-                $nextStatus = 'not_synced';
-                $summary['not_synced']++;
             } elseif ($status->sync_status === 'error') {
                 $nextStatus = 'error';
                 $summary['error']++;
@@ -124,13 +115,11 @@ class ReconcileCiencuadrasActiveProperties extends Command
                     'target_status' => $nextStatus === 'synced' ? 'A' : null,
                     'portal_check' => [
                         'active' => $portalCode !== null,
-                        'portal_code' => $portalCode ?: $legacyPortalCode,
-                        'legacy_code' => $legacyPortalCode !== null,
+                        'portal_code' => $portalCode,
                         'checked_at' => now()->toISOString(),
                     ],
                 ],
                 'last_error' => match (true) {
-                    $legacyPortalCode !== null => "Ciencuadras todavía conserva el código legado {$legacyPortalCode}. La republicación limpia está bloqueada hasta eliminarlo.",
                     $nextStatus === 'not_synced' => 'Ciencuadras no reporta este inmueble como activo. Se enviará nuevamente si sigue publicado en el sistema.',
                     default => null,
                 },
@@ -140,8 +129,7 @@ class ReconcileCiencuadrasActiveProperties extends Command
         }
 
         $this->info(
-            "Publicados limpios: {$portalCodes->count()} | Códigos legados: {$legacyBySourceCode->count()} | "
-            . "Confirmados: {$summary['active']} | "
+            "Publicados en portal: {$portalCodes->count()} | Confirmados: {$summary['active']} | "
             . "En espera: {$summary['pending']} | Por reenviar: {$summary['not_synced']} | "
             . "Despublicados: {$summary['paused']} | Errores: {$summary['error']} | "
             . "Sin cambios: {$summary['unchanged']}"

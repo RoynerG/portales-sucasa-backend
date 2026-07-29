@@ -160,25 +160,9 @@ class CiencuadrasActiveProperties
             ->values();
     }
 
-    public function legacyCodes(bool $fresh = false): ?Collection
-    {
-        return $this->codes($fresh)
-            ?->filter(fn (string $code) => $this->isLegacyCode($code))
-            ->values();
-    }
-
     public function sourceCodes(bool $fresh = false): ?Collection
     {
         return $this->cleanCodes($fresh)
-            ?->map(fn (string $code) => $this->sourceCode($code))
-            ->filter()
-            ->unique()
-            ->values();
-    }
-
-    public function legacySourceCodes(bool $fresh = false): ?Collection
-    {
-        return $this->legacyCodes($fresh)
             ?->map(fn (string $code) => $this->sourceCode($code))
             ->filter()
             ->unique()

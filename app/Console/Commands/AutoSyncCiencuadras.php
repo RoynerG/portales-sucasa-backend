@@ -47,8 +47,6 @@ class AutoSyncCiencuadras extends Command
         $limit = max(1, (int) ($this->option('limit') ?: config('portals.ciencuadras.auto_sync_limit', 20)));
         $scan = max($limit, (int) ($this->option('scan') ?: config('portals.ciencuadras.auto_sync_scan', 500)));
         $dryRun = (bool) $this->option('dry-run');
-        $legacySourceCodes = $activeProperties->legacySourceCodes() ?? collect();
-        $cleanSourceCodes = $activeProperties->sourceCodes() ?? collect();
 
         $credential = $dryRun ? null : $this->credential($client);
         if (! $dryRun && ! $credential) {
@@ -116,12 +114,22 @@ class AutoSyncCiencuadras extends Command
 
             [$action, $status] = $decision;
 
-            if (in_array($action, ['publish', 'update'], true)
-                && $legacySourceCodes->contains($code)
-                && ! $cleanSourceCodes->contains($code)) {
-                $this->warn("{$code}: bloqueado; Ciencuadras todavía conserva el código legado con P.");
-                $summary['skipped']++;
-                continue;
+            if ($action === 'publish' && ! $dryRun) {
+                $legacyState = $activeProperties->inspectLegacyCode(
+                    $activeProperties->legacyCodeForSource($code),
+                    $credential,
+                    true
+                );
+                if ($legacyState === null) {
+                    $this->warn("{$code}: omitido; no fue posible verificar la publicación anterior.");
+                    $summary['skipped']++;
+                    continue;
+                }
+                if ($legacyState['state'] === 'active') {
+                    $this->warn("{$code}: bloqueado; todavía existe una publicación anterior en Ciencuadras.");
+                    $summary['skipped']++;
+                    continue;
+                }
             }
 
             $this->line("{$code}: {$action}");

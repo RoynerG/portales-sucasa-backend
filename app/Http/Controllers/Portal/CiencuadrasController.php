@@ -134,10 +134,6 @@ class CiencuadrasController extends Controller
             ? $this->activeProperties->sourceCodes()?->flip()
             : collect();
         abort_if($knownSourceCodes === null, 503, 'No fue posible verificar el inventario de Ciencuadras.');
-        $legacySourceCodes = $action === 'publish'
-            ? $this->activeProperties->legacySourceCodes()?->flip()
-            : collect();
-        abort_if($legacySourceCodes === null, 503, 'No fue posible verificar los códigos anteriores de Ciencuadras.');
 
         $payloads = [];
         $properties = [];
@@ -156,13 +152,22 @@ class CiencuadrasController extends Controller
                 continue;
             }
 
-            if ($action === 'publish' && $legacySourceCodes->has($code)) {
-                $rejected[] = [
-                    'code' => $code,
-                    'message' => 'Todavía existe una publicación con código P. Retírala antes de publicar el código limpio.',
-                ];
+            if ($action === 'publish') {
+                $previousState = $this->activeProperties->inspectLegacyCode(
+                    $this->activeProperties->legacyCodeForSource($code),
+                    $credential,
+                    true
+                );
+                if ($previousState === null || $previousState['state'] === 'active') {
+                    $rejected[] = [
+                        'code' => $code,
+                        'message' => $previousState === null
+                            ? 'No fue posible verificar la publicación anterior en Ciencuadras.'
+                            : 'Todavía existe una publicación anterior. Retírala antes de publicar el código limpio.',
+                    ];
 
-                continue;
+                    continue;
+                }
             }
 
             $inspection = $inspectedCodes->get($code);

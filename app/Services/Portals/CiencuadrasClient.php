@@ -6,6 +6,7 @@ use App\Models\PortalCredential;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\RequestException;
+use GuzzleHttp\Promise\Utils;
 use Illuminate\Support\Facades\Log;
 
 class CiencuadrasClient
@@ -20,11 +21,12 @@ class CiencuadrasClient
         ];
 
         try {
-            $response = $this->http->post(config('portals.ciencuadras.api_url') . '/login', [
+            $response = $this->http->post(config('portals.ciencuadras.api_url').'/login', [
                 'json' => $credentials,
                 'headers' => ['Accept' => 'application/json'],
                 'timeout' => 30,
             ]);
+
             return ['ok' => true, 'data' => json_decode((string) $response->getBody(), true)];
         } catch (RequestException $e) {
             return ['ok' => false, 'data' => $this->errorData($e)];
@@ -41,6 +43,47 @@ class CiencuadrasClient
     public function consultProperty(string $propertyCode, PortalCredential $cred): array
     {
         return $this->request('POST', '/api/consult-property', ['propertyCode' => $propertyCode], $cred);
+    }
+
+    public function consultProperties(array $propertyCodes, PortalCredential $cred): array
+    {
+        $promises = [];
+
+        foreach (array_values(array_unique($propertyCodes)) as $propertyCode) {
+            $promises[$propertyCode] = $this->http->requestAsync(
+                'POST',
+                config('portals.ciencuadras.api_url').'/api/consult-property',
+                [
+                    'json' => ['propertyCode' => $propertyCode],
+                    'headers' => [
+                        'Authorization' => 'Bearer '.$cred->access_token,
+                        'Accept' => 'application/json',
+                        'Content-Type' => 'application/json',
+                    ],
+                    'timeout' => 45,
+                ]
+            );
+        }
+
+        return collect(Utils::settle($promises)->wait())
+            ->map(function (array $settled) {
+                if ($settled['state'] === 'fulfilled') {
+                    return [
+                        'ok' => true,
+                        'data' => json_decode((string) $settled['value']->getBody(), true),
+                    ];
+                }
+
+                $reason = $settled['reason'];
+
+                return [
+                    'ok' => false,
+                    'data' => $reason instanceof RequestException
+                        ? $this->errorData($reason)
+                        : ['error' => $reason->getMessage()],
+                ];
+            })
+            ->all();
     }
 
     public function consultStatus(array $payload, PortalCredential $cred): array
@@ -102,21 +145,24 @@ class CiencuadrasClient
     protected function request(string $method, string $path, array $body, PortalCredential $cred): array
     {
         try {
-            $response = $this->http->request($method, config('portals.ciencuadras.api_url') . $path, [
+            $response = $this->http->request($method, config('portals.ciencuadras.api_url').$path, [
                 'json' => $body,
                 'headers' => [
-                    'Authorization' => 'Bearer ' . $cred->access_token,
+                    'Authorization' => 'Bearer '.$cred->access_token,
                     'Accept' => 'application/json',
                     'Content-Type' => 'application/json',
                 ],
                 'timeout' => 45,
             ]);
+
             return ['ok' => true, 'data' => json_decode((string) $response->getBody(), true)];
         } catch (RequestException $e) {
             Log::warning('CC request failed', ['path' => $path, 'err' => $e->getMessage()]);
+
             return ['ok' => false, 'data' => $this->errorData($e)];
         } catch (GuzzleException $e) {
             Log::warning('CC request failed', ['path' => $path, 'err' => $e->getMessage()]);
+
             return ['ok' => false, 'data' => ['error' => $e->getMessage()]];
         }
     }

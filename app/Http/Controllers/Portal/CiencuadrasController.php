@@ -12,6 +12,7 @@ use App\Services\Portals\CiencuadrasClient;
 use App\Services\Portals\CiencuadrasPropertyMapper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class CiencuadrasController extends Controller
 {
@@ -114,6 +115,203 @@ class CiencuadrasController extends Controller
             'errors' => $mapped['errors'],
             'payload' => $mapped['payload'],
         ]]);
+    }
+
+    public function bulkCandidates(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'action' => ['required', 'in:update,pause'],
+            'fresh' => ['nullable', 'boolean'],
+        ]);
+
+        $codes = $this->activeProperties->sourceCodes(
+            $request->boolean('fresh', true)
+        );
+        abort_if($codes === null, 503, 'No fue posible consultar el inventario de Ciencuadras.');
+
+        $existingCodes = DB::connection('wordpress')
+            ->table('wp_jet_cct_inmuebles')
+            ->where('cct_status', 'publish')
+            ->whereIn('codigo', $codes)
+            ->pluck('codigo')
+            ->map(fn ($code) => trim((string) $code))
+            ->filter()
+            ->unique()
+            ->values();
+
+        return response()->json(['Datos' => [
+            'portal' => 'ciencuadras',
+            'action' => $data['action'],
+            'environment' => config('portals.ciencuadras.environment'),
+            'total' => $existingCodes->count(),
+            'codes' => $existingCodes,
+        ]]);
+    }
+
+    public function bulk(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'action' => ['required', 'in:publish,update,pause'],
+            'codes' => ['required', 'array', 'min:1', 'max:20'],
+            'codes.*' => ['required', 'string', 'distinct', 'max:32'],
+        ]);
+
+        $action = $data['action'];
+        $targetStatus = $action === 'pause' ? 'I' : 'A';
+        $credential = $this->credential($request);
+        $inspectedCodes = in_array($action, ['update', 'pause'], true)
+            ? $this->activeProperties->inspectSourceCodes($data['codes'], $credential)
+            : collect();
+        $knownSourceCodes = $action === 'publish'
+            ? $this->activeProperties->sourceCodes()?->flip()
+            : collect();
+        abort_if($knownSourceCodes === null, 503, 'No fue posible verificar el inventario de Ciencuadras.');
+        $legacySourceCodes = $action === 'publish'
+            ? $this->activeProperties->legacySourceCodes()?->flip()
+            : collect();
+        abort_if($legacySourceCodes === null, 503, 'No fue posible verificar los códigos anteriores de Ciencuadras.');
+
+        $payloads = [];
+        $properties = [];
+        $rejected = [];
+        $skipped = [];
+
+        foreach ($data['codes'] as $value) {
+            $code = trim((string) $value);
+
+            if ($action === 'publish' && $knownSourceCodes->has($code)) {
+                $skipped[] = [
+                    'code' => $code,
+                    'message' => 'El código ya existe en Ciencuadras; usa Actualizar.',
+                ];
+
+                continue;
+            }
+
+            if ($action === 'publish' && $legacySourceCodes->has($code)) {
+                $rejected[] = [
+                    'code' => $code,
+                    'message' => 'Todavía existe una publicación con código P. Retírala antes de publicar el código limpio.',
+                ];
+
+                continue;
+            }
+
+            $inspection = $inspectedCodes->get($code);
+            if (in_array($action, ['update', 'pause'], true)
+                && ($inspection['state'] ?? 'unavailable') !== 'active') {
+                $notice = [
+                    'code' => $code,
+                    'message' => ($inspection['state'] ?? null) === 'unavailable'
+                        ? 'No fue posible verificar este inmueble en Ciencuadras.'
+                        : 'Ciencuadras no lo reporta activo; no se modificó.',
+                ];
+                if (($inspection['state'] ?? null) === 'unavailable') {
+                    $rejected[] = $notice;
+                } else {
+                    $skipped[] = $notice;
+                }
+
+                continue;
+            }
+
+            try {
+                $mapped = $this->mapper->fromCode($code, $targetStatus);
+                if ($action !== 'publish') {
+                    $mapped['payload']['propertyCode'] = $this->payloadCodeForExistingListing(
+                        $mapped['property']->id,
+                        (string) $mapped['payload']['propertyCode']
+                    );
+                }
+
+                if ($mapped['errors']) {
+                    $rejected[] = [
+                        'code' => $code,
+                        'message' => implode(' ', $mapped['errors']),
+                    ];
+
+                    continue;
+                }
+
+                $payloads[] = $mapped['payload'];
+                $properties[] = [
+                    'code' => $code,
+                    'property' => $mapped['property'],
+                    'external_code' => $this->consultCodeFromPayload(
+                        (string) $mapped['payload']['propertyCode']
+                    ),
+                ];
+            } catch (\Throwable $exception) {
+                $rejected[] = [
+                    'code' => $code,
+                    'message' => $exception->getMessage(),
+                ];
+            }
+        }
+
+        if ($payloads === []) {
+            return response()->json(['Datos' => [
+                'ok' => false,
+                'accepted' => 0,
+                'rejected' => $rejected,
+                'skipped' => $skipped,
+            ]], $rejected === [] ? 200 : 422);
+        }
+
+        $result = $action === 'publish'
+            ? $this->cc->insertProperty($payloads, $credential)
+            : $this->cc->updateProperty($payloads, $credential);
+        $idRequest = ($result['ok'] ?? false)
+            ? $this->cc->extractIdRequest($result['data'] ?? [])
+            : null;
+        $accepted = (bool) ($result['ok'] ?? false) && $idRequest;
+        $syncStatus = $accepted ? 'pending' : 'error';
+        $response = [
+            'target_action' => $action,
+            'target_status' => $targetStatus,
+            'batch' => true,
+            'codes' => collect($properties)->pluck('code')->values()->all(),
+            'request' => $result['data'] ?? null,
+        ];
+        $items = [];
+        if (! $accepted) {
+            $portalMessage = $this->errorMessage($response);
+            foreach ($properties as $item) {
+                $rejected[] = [
+                    'code' => $item['code'],
+                    'message' => $portalMessage,
+                ];
+            }
+        }
+
+        foreach ($properties as $item) {
+            $this->saveStatus(
+                $item['property']->id,
+                $syncStatus,
+                $item['external_code'],
+                $response,
+                $accepted ? null : $this->errorMessage($response)
+            );
+            $items[] = [
+                'code' => $item['code'],
+                'external_code' => $item['external_code'],
+                'sync_status' => $syncStatus,
+                'id_request' => $idRequest,
+            ];
+        }
+
+        return response()->json(['Datos' => [
+            'ok' => $accepted,
+            'portal' => 'ciencuadras',
+            'action' => $action,
+            'environment' => config('portals.ciencuadras.environment'),
+            'accepted' => $accepted ? count($items) : 0,
+            'rejected' => $rejected,
+            'skipped' => $skipped,
+            'id_request' => $idRequest,
+            'items' => $items,
+            'response' => $result['data'] ?? null,
+        ]], $accepted ? 202 : 422);
     }
 
     protected function send(Request $request, string $code, string $action, string $status): JsonResponse

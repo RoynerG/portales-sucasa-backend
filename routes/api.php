@@ -48,6 +48,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/properties', [PropertyController::class, 'index']);
     Route::post('/properties', [PropertyController::class, 'store']);
     Route::get('/properties/stats', [PropertyController::class, 'statsByStatus']);
+    Route::get('/properties/portal-summary', [PropertyController::class, 'portalSummary']);
     Route::get('/properties/distribution', [PropertyController::class, 'distribution']);
     Route::get('/properties/{code}', [PropertyController::class, 'show']);
     Route::patch('/properties/{code}', [PropertyController::class, 'update']);
@@ -81,6 +82,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/properties/{code}/fincaraiz/pause', [FincaraizController::class, 'pause']);
 
         Route::post('/ciencuadras/login', [CiencuadrasController::class, 'login']);
+        Route::get('/ciencuadras/bulk-candidates', [CiencuadrasController::class, 'bulkCandidates']);
+        Route::post('/ciencuadras/bulk', [CiencuadrasController::class, 'bulk']);
         Route::get('/ciencuadras/legacy-codes', [CiencuadrasLegacyController::class, 'index']);
         Route::post('/ciencuadras/legacy-codes/delete', [CiencuadrasLegacyController::class, 'deleteSelected']);
         Route::post('/ciencuadras/legacy-codes/verify', [CiencuadrasLegacyController::class, 'verify']);

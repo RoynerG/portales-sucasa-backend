@@ -71,6 +71,50 @@ class WordPressPropertyRepository
             ->values();
     }
 
+    public function portalSummary(): array
+    {
+        $codes = $this->baseQuery()
+            ->pluck('codigo')
+            ->map(fn ($code) => trim((string) $code))
+            ->filter()
+            ->unique()
+            ->values();
+
+        $latestStatuses = Property::query()
+            ->whereIn('code', $codes)
+            ->with(['syncStatuses' => fn ($query) => $query->with('integration')->latest('updated_at')])
+            ->get()
+            ->mapWithKeys(fn (Property $property) => [
+                $property->code => $property->syncStatuses
+                    ->filter(fn ($status) => $this->currentPortalEnvironment(
+                        $status->integration?->slug,
+                        $status->environment
+                    ))
+                    ->groupBy(fn ($status) => $status->integration_id.':'.($status->portal_variant ?: 'default'))
+                    ->map(fn (Collection $rows) => $rows->first())
+                    ->values(),
+            ]);
+
+        $published = 0;
+        $pending = 0;
+        $error = 0;
+
+        foreach ($codes as $code) {
+            $states = $latestStatuses->get($code, collect())->pluck('sync_status');
+            $published += $states->contains('synced') ? 1 : 0;
+            $pending += $states->contains(fn ($status) => in_array($status, ['pending', 'syncing'], true)) ? 1 : 0;
+            $error += $states->contains('error') ? 1 : 0;
+        }
+
+        return [
+            'total' => $codes->count(),
+            'published' => $published,
+            'not_published' => max(0, $codes->count() - $published),
+            'pending' => $pending,
+            'error' => $error,
+        ];
+    }
+
     public function distribution(): Collection
     {
         return $this->baseQuery()
@@ -245,6 +289,21 @@ class WordPressPropertyRepository
             ->where('cct_status', 'publish');
     }
 
+    protected function currentPortalEnvironment(?string $portal, ?string $environment): bool
+    {
+        if (! $portal || ! $environment) {
+            return true;
+        }
+
+        $expected = match ($portal) {
+            'ciencuadras' => config('portals.ciencuadras.environment', 'production'),
+            'mercadolibre' => config('portals.mercadolibre.environment', 'production'),
+            default => 'production',
+        };
+
+        return $environment === $expected;
+    }
+
     protected function applyFilters(Builder $query, array $filters): void
     {
         if ($code = $filters['codigo'] ?? null) {
@@ -340,7 +399,7 @@ class WordPressPropertyRepository
             'id' => (int) $row->_ID,
             'legacy_id' => (int) $row->_ID,
             'code' => (string) $row->codigo,
-            'title' => trim(($row->tipo_inmueble ?: 'Inmueble') . ' en ' . ($row->tipo_negocio ?: 'gestión') . ($row->barrio ? ' - ' . $row->barrio : '')),
+            'title' => trim(($row->tipo_inmueble ?: 'Inmueble').' en '.($row->tipo_negocio ?: 'gestión').($row->barrio ? ' - '.$row->barrio : '')),
             'description' => ($row->descripcion ?? null) ?: $row->datos_adicionales ?: $row->punto_referencia,
             'condition' => 'used',
             'city' => $row->ciudad,
@@ -453,7 +512,7 @@ class WordPressPropertyRepository
             ->map(fn ($name) => trim((string) $name))
             ->filter()
             ->map(fn ($name) => [
-                'id' => abs(crc32($group . ':' . $name)),
+                'id' => abs(crc32($group.':'.$name)),
                 'name' => $name,
                 'group' => $group,
                 'icon' => null,
@@ -543,6 +602,7 @@ class WordPressPropertyRepository
     protected function integer($value): ?int
     {
         $number = preg_replace('/[^\d]/', '', (string) $value);
+
         return $number === '' ? null : (int) $number;
     }
 
@@ -556,6 +616,7 @@ class WordPressPropertyRepository
     protected function yesNo($value): bool
     {
         $flat = strtolower(implode(' ', $this->decodeList((string) $value)));
+
         return str_contains($flat, 'si') || in_array(strtolower(trim((string) $value)), ['1', 'true', 'yes', 'si', 'sí'], true);
     }
 }

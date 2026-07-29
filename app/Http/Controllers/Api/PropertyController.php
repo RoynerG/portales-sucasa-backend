@@ -111,6 +111,35 @@ class PropertyController extends Controller
         return response()->json(['Datos' => $stats]);
     }
 
+    public function portalSummary(): JsonResponse
+    {
+        if ($this->wordpress->enabled()) {
+            return response()->json(['Datos' => $this->wordpress->portalSummary()]);
+        }
+
+        $properties = Property::query()
+            ->with(['syncStatuses' => fn ($query) => $query->latest('updated_at')])
+            ->get();
+
+        return response()->json(['Datos' => [
+            'total' => $properties->count(),
+            'published' => $properties->filter(
+                fn (Property $property) => $property->syncStatuses->contains('sync_status', 'synced')
+            )->count(),
+            'not_published' => $properties->filter(
+                fn (Property $property) => ! $property->syncStatuses->contains('sync_status', 'synced')
+            )->count(),
+            'pending' => $properties->filter(
+                fn (Property $property) => $property->syncStatuses->contains(
+                    fn (PropertySyncStatus $status) => in_array($status->sync_status, ['pending', 'syncing'], true)
+                )
+            )->count(),
+            'error' => $properties->filter(
+                fn (Property $property) => $property->syncStatuses->contains('sync_status', 'error')
+            )->count(),
+        ]]);
+    }
+
     public function distribution(): JsonResponse
     {
         if ($this->wordpress->enabled()) {
@@ -151,8 +180,12 @@ class PropertyController extends Controller
         $data = $this->validateProperty($request, partial: true);
         $property->update(array_merge($data, ['updated_by' => $request->user()->id]));
 
-        if ($request->has('features')) $this->attachFeatures($property, $request);
-        if ($request->has('images')) $this->attachImages($property, $request);
+        if ($request->has('features')) {
+            $this->attachFeatures($property, $request);
+        }
+        if ($request->has('images')) {
+            $this->attachImages($property, $request);
+        }
 
         return response()->json(['Datos' => [new PropertyResource($property->fresh())]]);
     }
@@ -160,6 +193,7 @@ class PropertyController extends Controller
     public function destroy(string $code): JsonResponse
     {
         Property::where('code', $code)->delete();
+
         return response()->json(['Datos' => 'OK']);
     }
 
@@ -185,6 +219,7 @@ class PropertyController extends Controller
     private function validateProperty(Request $request, bool $partial = false): array
     {
         $req = $partial ? 'sometimes' : 'required';
+
         return $request->validate([
             'code' => [$req, 'string', 'max:32', 'unique:properties,code'],
             'title' => [$req, 'string', 'max:200'],
@@ -230,6 +265,7 @@ class PropertyController extends Controller
         $features = collect($request->input('features', []))->mapWithKeys(function ($item) {
             $id = is_array($item) ? $item['id'] : $item;
             $value = is_array($item) ? ($item['value'] ?? null) : null;
+
             return [$id => ['value' => $value]];
         });
         $property->features()->sync($features);
@@ -238,7 +274,9 @@ class PropertyController extends Controller
     private function attachImages(Property $property, Request $request): void
     {
         $images = $request->input('images', []);
-        if (! is_array($images)) return;
+        if (! is_array($images)) {
+            return;
+        }
         $property->images()->delete();
         foreach ($images as $i => $img) {
             $property->images()->create([

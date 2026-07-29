@@ -12,7 +12,72 @@ class CiencuadrasActiveProperties
 
     public function codes(bool $fresh = false): ?Collection
     {
-        $cacheKey = 'ciencuadras.active-properties.'.config('portals.ciencuadras.environment');
+        return $this->inventory($fresh)
+            ?->pluck('propertyCode')
+            ->map(fn ($code) => trim((string) $code))
+            ->filter()
+            ->unique()
+            ->values();
+    }
+
+    public function activeCodes(bool $fresh = false): ?Collection
+    {
+        return $this->inventory($fresh)
+            ?->filter(fn (array $property) => $this->isActiveInventoryProperty($property))
+            ->pluck('propertyCode')
+            ->map(fn ($code) => trim((string) $code))
+            ->filter()
+            ->unique()
+            ->values();
+    }
+
+    public function activeSourceCodes(bool $fresh = false): ?Collection
+    {
+        return $this->activeCodes($fresh)
+            ?->reject(fn (string $code) => $this->isLegacyCode($code))
+            ->map(fn (string $code) => $this->sourceCode($code))
+            ->filter()
+            ->unique()
+            ->values();
+    }
+
+    public function inspectSourceCodes(array|Collection $sourceCodes, PortalCredential $credential): Collection
+    {
+        $prefix = (string) config('portals.ciencuadras.property_code_prefix', '22130-');
+        $portalCodes = collect($sourceCodes)
+            ->map(fn ($code) => $this->sourceCode((string) $code))
+            ->filter()
+            ->unique()
+            ->mapWithKeys(fn (string $code) => [$code => $prefix.$code]);
+        $results = $this->client->consultProperties($portalCodes->values()->all(), $credential);
+
+        return $portalCodes->map(function (string $portalCode) use ($results) {
+            $result = $results[$portalCode] ?? null;
+            if (! ($result['ok'] ?? false)) {
+                return [
+                    'state' => 'unavailable',
+                    'property' => null,
+                    'response' => $result['data'] ?? null,
+                ];
+            }
+
+            return $this->stateFromResponse($result['data'] ?? []);
+        });
+    }
+
+    public function activeLegacySourceCodes(bool $fresh = false): ?Collection
+    {
+        return $this->activeCodes($fresh)
+            ?->filter(fn (string $code) => $this->isLegacyCode($code))
+            ->map(fn (string $code) => $this->sourceCode($code))
+            ->filter()
+            ->unique()
+            ->values();
+    }
+
+    protected function inventory(bool $fresh = false): ?Collection
+    {
+        $cacheKey = 'ciencuadras.properties-inventory.'.config('portals.ciencuadras.environment');
 
         if ($fresh) {
             Cache::forget($cacheKey);
@@ -37,12 +102,48 @@ class CiencuadrasActiveProperties
             }
 
             return collect($result['data']['message'] ?? [])
-                ->pluck('propertyCode')
-                ->map(fn ($code) => trim((string) $code))
-                ->filter()
-                ->unique()
+                ->filter(fn ($property) => is_array($property) && ! empty($property['propertyCode']))
                 ->values();
         });
+    }
+
+    protected function isActiveInventoryProperty(array $property): bool
+    {
+        $active = strtolower(trim((string) ($property['active'] ?? '')));
+        $status = trim((string) ($property['status'] ?? ''));
+
+        if (in_array($status, ['5', '8'], true)
+            || str_contains($active, 'inactivo')
+            || str_contains($active, 'eliminado')) {
+            return false;
+        }
+
+        return $active === 'activo' || in_array($status, ['0', '4'], true);
+    }
+
+    protected function stateFromResponse(array $response): array
+    {
+        $message = $response['message'] ?? null;
+        $property = is_array($message)
+            && array_is_list($message)
+            && isset($message[0])
+            && is_array($message[0])
+                ? $message[0]
+                : null;
+
+        if (! $property) {
+            return [
+                'state' => 'missing',
+                'property' => null,
+                'response' => $response,
+            ];
+        }
+
+        return [
+            'state' => $this->isActiveInventoryProperty($property) ? 'active' : 'inactive',
+            'property' => $property,
+            'response' => $response,
+        ];
     }
 
     public function sourceCode(string $portalCode): string

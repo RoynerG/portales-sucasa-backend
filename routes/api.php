@@ -60,10 +60,17 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Portales
     Route::prefix('portals')->group(function () {
+        Route::get('/mercadolibre/status', [MercadoLibreController::class, 'status']);
         Route::get('/mercadolibre/authorize', [MercadoLibreController::class, 'redirect']);
+        Route::post('/mercadolibre/disconnect', [MercadoLibreController::class, 'disconnect']);
+        Route::post('/mercadolibre/catalog/sync', [MercadoLibreController::class, 'syncCatalog']);
+        Route::get('/properties/{code}/mercadolibre/preflight', [MercadoLibreController::class, 'preflight']);
+        Route::patch('/properties/{code}/mercadolibre/settings', [MercadoLibreController::class, 'saveSettings']);
         Route::post('/properties/{code}/mercadolibre/publish', [MercadoLibreController::class, 'publish']);
         Route::post('/properties/{code}/mercadolibre/update', [MercadoLibreController::class, 'update']);
         Route::post('/properties/{code}/mercadolibre/pause', [MercadoLibreController::class, 'pause']);
+        Route::post('/properties/{code}/mercadolibre/activate', [MercadoLibreController::class, 'activate']);
+        Route::post('/properties/{code}/mercadolibre/close', [MercadoLibreController::class, 'close']);
         Route::post('/properties/{code}/mercadolibre/verify', [MercadoLibreController::class, 'verify']);
 
         Route::get('/fincaraiz/client', [FincaraizController::class, 'clientInfo']);
@@ -101,4 +108,3 @@ Route::middleware('auth:sanctum')->group(function () {
 // Callbacks y webhooks (sin auth, validados por su propio mecanismo)
 Route::get('/portals/mercadolibre/callback', [MercadoLibreController::class, 'callback'])->name('ml.callback');
 Route::post('/portals/mercadolibre/webhook', [MercadoLibreController::class, 'webhook']);
-Route::get('/portals/mercadolibre/webhook', [MercadoLibreController::class, 'webhook']);

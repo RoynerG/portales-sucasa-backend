@@ -119,7 +119,7 @@ class ProppitPropertyMapper
         }
 
         if (empty(config('portals.proppit.user')) || empty(config('portals.proppit.password'))) {
-            $errors[] = 'Configura PROPPIT_USER y PROPPIT_PASSWORD en .env.';
+            $errors[] = 'Configura PROPPIT_CLIENT_ID y PROPPIT_CLIENT_SECRET en .env.';
         }
 
         if (empty(config('portals.proppit.publisher_external_id'))) {

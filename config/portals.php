@@ -8,6 +8,13 @@ return [
         'redirect_uri'  => env('MERCADOLIBRE_REDIRECT_URI'),
         'api_url'       => env('MERCADOLIBRE_API_URL', 'https://api.mercadolibre.com'),
         'auth_url'      => env('MERCADOLIBRE_AUTH_URL', 'https://auth.mercadolibre.com.co'),
+        'site_id'       => env('MERCADOLIBRE_SITE_ID', 'MCO'),
+        'country_id'    => env('MERCADOLIBRE_COUNTRY_ID', 'CO'),
+        'currency_id'   => env('MERCADOLIBRE_CURRENCY_ID', 'COP'),
+        'account_key'   => env('MERCADOLIBRE_ACCOUNT_KEY', 'shared'),
+        'environment'   => env('MERCADOLIBRE_ENV', 'production'),
+        'webhook_queue' => env('MERCADOLIBRE_WEBHOOK_QUEUE', 'mercadolibre'),
+        'default_listing_type' => env('MERCADOLIBRE_DEFAULT_LISTING_TYPE', 'silver'),
     ],
 
     'fincaraiz' => [
@@ -35,8 +42,10 @@ return [
     'proppit' => [
         'api_url' => env('PROPPIT_API_URL', 'https://real-time.proppit.com/api/v2'),
         'country' => env('PROPPIT_COUNTRY', 'CO'),
-        'user' => env('PROPPIT_USER'),
-        'password' => env('PROPPIT_PASSWORD'),
+        // Proppit entrega estas credenciales como Client ID / Client Secret,
+        // aunque su endpoint /token exige enviarlas como user / password.
+        'user' => env('PROPPIT_CLIENT_ID', env('PROPPIT_USER')),
+        'password' => env('PROPPIT_CLIENT_SECRET', env('PROPPIT_PASSWORD')),
         'publisher_external_id' => env('PROPPIT_PUBLISHER_EXTERNAL_ID'),
         'default_contact_name' => env('PROPPIT_DEFAULT_CONTACT_NAME', 'Su Casa Inmobiliaria'),
         'default_contact_email' => env('PROPPIT_DEFAULT_CONTACT_EMAIL'),

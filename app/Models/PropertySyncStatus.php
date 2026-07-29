@@ -11,7 +11,7 @@ class PropertySyncStatus extends Model
     use HasFactory;
 
     protected $fillable = [
-        'property_id', 'integration_id', 'environment', 'sync_status',
+        'property_id', 'integration_id', 'environment', 'portal_variant', 'sync_status',
         'external_id', 'external_url', 'last_response', 'last_error',
         'last_synced_at', 'last_attempt_at', 'attempts',
     ];

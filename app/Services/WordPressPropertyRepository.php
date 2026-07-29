@@ -422,6 +422,7 @@ class WordPressPropertyRepository
                     'portal' => $status->integration?->slug,
                     'portal_name' => $status->integration?->name,
                     'environment' => $status->environment,
+                    'portal_variant' => $status->portal_variant,
                     'sync_status' => $status->sync_status,
                     'external_id' => $status->external_id,
                     'external_url' => $status->external_url,

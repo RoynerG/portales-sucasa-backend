@@ -19,3 +19,7 @@ Schedule::command('ciencuadras:auto-sync')
 Schedule::command('ciencuadras:reconcile-active')
     ->everyTenMinutes()
     ->withoutOverlapping();
+
+Schedule::command('mercadolibre:sync-catalog')
+    ->dailyAt('03:30')
+    ->withoutOverlapping();

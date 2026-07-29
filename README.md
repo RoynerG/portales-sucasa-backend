@@ -85,6 +85,9 @@ MERCADOLIBRE_CLIENT_SECRET=
 FINCARAIZ_API_KEY=
 CIENCUADRAS_EMAIL=
 CIENCUADRAS_PASSWORD=
+PROPPIT_CLIENT_ID=
+PROPPIT_CLIENT_SECRET=
+PROPPIT_PUBLISHER_EXTERNAL_ID=
 ```
 
 ### 6. Generar APP_KEY
@@ -185,6 +188,14 @@ Si Laravel corre en otro puerto/host, copia `panel/.env.example` a `panel/.env` 
 ## Integraciones por API
 
 Proppit ya no usa feed XML: publica, actualiza y despublica con la API real-time v2.
+
+Proppit denomina las credenciales `Client ID` y `Client Secret`, pero su endpoint
+`POST /token` exige enviarlas como `user` y `password`. El backend hace esa
+adaptación. `PROPPIT_PUBLISHER_EXTERNAL_ID` es un identificador independiente:
+debe existir para esas credenciales y estar aprobado por Proppit.
+
+El `referenceId` enviado a Proppit siempre es el código original del inmueble,
+sin agregar prefijos. Por ejemplo, el inmueble `53824` se envía como `53824`.
 
 ## Programar tareas automáticas (opcional)
 

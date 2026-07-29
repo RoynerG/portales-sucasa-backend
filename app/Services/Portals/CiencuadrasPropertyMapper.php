@@ -6,7 +6,6 @@ use App\Models\City;
 use App\Models\Property;
 use App\Models\PropertyType;
 use App\Models\TransactionType;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -24,8 +23,7 @@ class CiencuadrasPropertyMapper
 
         abort_unless($row, 404, 'Propiedad no encontrada en wp_jet_cct_inmuebles.');
 
-        $consultant = $this->consultant($row);
-        $payload = $this->payload($row, $consultant, $status);
+        $payload = $this->payload($row, $status);
 
         return [
             'payload' => $payload,
@@ -69,13 +67,14 @@ class CiencuadrasPropertyMapper
         return preg_replace('/^P(?=\d)/i', '', $code) ?? $code;
     }
 
-    protected function payload(stdClass $row, ?stdClass $consultant, string $status): array
+    protected function payload(stdClass $row, string $status): array
     {
         $typeId = $this->propertyTypeId($row->tipo_inmueble);
         $transactionId = $this->transactionTypeId($row->tipo_negocio);
         $description = $this->description($row);
         $images = $this->media($row);
         $localityId = $this->localityId($row);
+        $advisor = $this->advisorContact();
 
         $payload = [
             'cityId' => $this->cityId($row),
@@ -93,10 +92,10 @@ class CiencuadrasPropertyMapper
             'additionalInfo' => $description,
             'status' => $status,
             'integrator' => (string) config('portals.ciencuadras.integrator'),
-            'advisorName' => $this->text($consultant->nombre ?? $row->funcionario ?? 'Sucasa Inmobiliaria'),
-            'advisorPhone' => $this->phone($consultant->celular ?? null),
-            'advisorMail' => filter_var($consultant->correo ?? null, FILTER_VALIDATE_EMAIL) ? $consultant->correo : null,
-            'advisorWhatsapp' => $this->phone($consultant->celular ?? null),
+            'advisorName' => $advisor['name'],
+            'advisorPhone' => $advisor['phone'],
+            'advisorMail' => $advisor['email'],
+            'advisorWhatsapp' => $advisor['whatsapp'],
             'features' => [
                 'numBedRooms' => (int) ($this->integer($row->habitaciones) ?? 0),
                 'numBathrooms' => (int) ($this->integer($row->banos) ?? 0),
@@ -176,6 +175,19 @@ class CiencuadrasPropertyMapper
         }
 
         if ($status === 'A') {
+            $contactLabels = [
+                'advisorName' => 'CIENCUADRAS_CONTACT_NAME',
+                'advisorPhone' => 'CIENCUADRAS_CONTACT_PHONE',
+                'advisorMail' => 'CIENCUADRAS_CONTACT_EMAIL',
+                'advisorWhatsapp' => 'CIENCUADRAS_CONTACT_WHATSAPP',
+            ];
+
+            foreach ($contactLabels as $field => $environmentVariable) {
+                if (empty($payload[$field])) {
+                    $errors[] = "Falta el contacto global {$environmentVariable}.";
+                }
+            }
+
             if (($payload['sellingPrice'] ?? 0) <= 0 && ($payload['leasingFee'] ?? 0) <= 0) {
                 $errors[] = 'Debe existir precio de venta o arriendo.';
             }
@@ -254,17 +266,21 @@ class CiencuadrasPropertyMapper
         );
     }
 
-    protected function consultant(stdClass $row): ?stdClass
+    protected function advisorContact(): array
     {
-        if (! $row->id_funcionario) {
-            return null;
-        }
+        $phone = $this->phone(config('portals.ciencuadras.contact_phone'));
+        $whatsapp = $this->phone(
+            config('portals.ciencuadras.contact_whatsapp')
+                ?: config('portals.ciencuadras.contact_phone')
+        );
+        $email = trim((string) config('portals.ciencuadras.contact_email'));
 
-        return DB::connection('wordpress')
-            ->table('wp_jet_cct_funcionarios')
-            ->where('id_empleado', $row->id_funcionario)
-            ->orWhere('_ID', $row->id_funcionario)
-            ->first();
+        return [
+            'name' => $this->text(config('portals.ciencuadras.contact_name')),
+            'phone' => $phone,
+            'email' => filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : null,
+            'whatsapp' => $whatsapp,
+        ];
     }
 
     protected function cityId(stdClass $row): int

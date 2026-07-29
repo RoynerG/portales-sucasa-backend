@@ -14,6 +14,10 @@ CIENCUADRAS_INTEGRATOR=SUCASA
 CIENCUADRAS_PROPERTY_CODE_PREFIX=22130-
 CIENCUADRAS_DEFAULT_CITY_ID=13001
 CIENCUADRAS_DEFAULT_LOCALITY_ID=
+CIENCUADRAS_CONTACT_NAME="Su Casa Inmobiliaria"
+CIENCUADRAS_CONTACT_PHONE=
+CIENCUADRAS_CONTACT_EMAIL=
+CIENCUADRAS_CONTACT_WHATSAPP=
 ```
 
 Despues de cambiar variables:
@@ -32,6 +36,10 @@ CIENCUADRAS_API_URL=https://ws-api.ciencuadras.com
 CIENCUADRAS_PAGE_URL=https://www.ciencuadras.com
 CIENCUADRAS_USERNAME=
 CIENCUADRAS_PASSWORD=
+CIENCUADRAS_CONTACT_NAME="Su Casa Inmobiliaria"
+CIENCUADRAS_CONTACT_PHONE=
+CIENCUADRAS_CONTACT_EMAIL=
+CIENCUADRAS_CONTACT_WHATSAPP=
 ```
 
 ## Datos que usa el sistema
@@ -88,5 +96,8 @@ Si las columnas no existen o estan vacias, se usan estas variables:
 
 - `CIENCUADRAS_DEFAULT_CITY_ID`: codigo DANE de la ciudad, por ejemplo Cartagena `13001`
 - `CIENCUADRAS_DEFAULT_LOCALITY_ID`
+- `CIENCUADRAS_CONTACT_NAME`, `CIENCUADRAS_CONTACT_PHONE`, `CIENCUADRAS_CONTACT_EMAIL`
+  y `CIENCUADRAS_CONTACT_WHATSAPP`: contacto publico unico enviado en todos los inmuebles.
+  Si `CIENCUADRAS_CONTACT_WHATSAPP` esta vacio, se reutiliza el telefono.
 
 `neighborhoodName` se envia por texto porque el manual indica que ya no es obligatorio homologarlo por ID.

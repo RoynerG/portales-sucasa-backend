@@ -65,16 +65,6 @@ class CiencuadrasActiveProperties
         });
     }
 
-    public function activeLegacySourceCodes(bool $fresh = false): ?Collection
-    {
-        return $this->activeCodes($fresh)
-            ?->filter(fn (string $code) => $this->isLegacyCode($code))
-            ->map(fn (string $code) => $this->sourceCode($code))
-            ->filter()
-            ->unique()
-            ->values();
-    }
-
     protected function inventory(bool $fresh = false): ?Collection
     {
         $cacheKey = 'ciencuadras.properties-inventory.'.config('portals.ciencuadras.environment');
@@ -103,6 +93,7 @@ class CiencuadrasActiveProperties
 
             return collect($result['data']['message'] ?? [])
                 ->filter(fn ($property) => is_array($property) && ! empty($property['propertyCode']))
+                ->reject(fn (array $property) => $this->isLegacyCode((string) $property['propertyCode']))
                 ->values();
         });
     }
@@ -181,53 +172,43 @@ class CiencuadrasActiveProperties
         ?PortalCredential $credential = null,
         bool $fresh = false
     ): ?array {
-        $cacheKey = 'ciencuadras.legacy-property.'
-            .config('portals.ciencuadras.environment')
-            .'.'.sha1($legacyCode);
-
-        if ($fresh) {
-            Cache::forget($cacheKey);
+        $credential ??= $this->credential();
+        if (! $credential) {
+            return null;
         }
 
-        return Cache::remember($cacheKey, now()->addSeconds(30), function () use ($legacyCode, $credential) {
-            $credential ??= $this->credential();
-            if (! $credential) {
-                return null;
-            }
+        $result = $this->client->consultProperty($legacyCode, $credential);
+        if (! ($result['ok'] ?? false)) {
+            return null;
+        }
 
-            $result = $this->client->consultProperty($legacyCode, $credential);
-            if (! ($result['ok'] ?? false)) {
-                return null;
-            }
+        $message = $result['data']['message'] ?? null;
+        $property = is_array($message)
+            && array_is_list($message)
+            && isset($message[0])
+            && is_array($message[0])
+                ? $message[0]
+                : null;
 
-            $message = $result['data']['message'] ?? null;
-            $property = is_array($message)
-                && array_is_list($message)
-                && isset($message[0])
-                && is_array($message[0])
-                    ? $message[0]
-                    : null;
-
-            if (! $property) {
-                return [
-                    'state' => 'missing',
-                    'property' => null,
-                    'response' => $result['data'] ?? null,
-                ];
-            }
-
-            $activeLabel = strtolower(trim((string) ($property['active'] ?? '')));
-            $status = trim((string) ($property['status'] ?? ''));
-            $inactive = in_array($status, ['5', '8'], true)
-                || str_contains($activeLabel, 'inactivo')
-                || str_contains($activeLabel, 'eliminado');
-
+        if (! $property) {
             return [
-                'state' => $inactive ? 'inactive' : ($activeLabel === 'activo' ? 'active' : 'unknown'),
-                'property' => $property,
+                'state' => 'missing',
+                'property' => null,
                 'response' => $result['data'] ?? null,
             ];
-        });
+        }
+
+        $activeLabel = strtolower(trim((string) ($property['active'] ?? '')));
+        $status = trim((string) ($property['status'] ?? ''));
+        $inactive = in_array($status, ['5', '8'], true)
+            || str_contains($activeLabel, 'inactivo')
+            || str_contains($activeLabel, 'eliminado');
+
+        return [
+            'state' => $inactive ? 'inactive' : ($activeLabel === 'activo' ? 'active' : 'unknown'),
+            'property' => $property,
+            'response' => $result['data'] ?? null,
+        ];
     }
 
     public function isLegacyCode(string $portalCode): bool

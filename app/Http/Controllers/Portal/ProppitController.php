@@ -23,34 +23,12 @@ class ProppitController extends Controller
     {
         $credential = $this->credential($request, true);
         $publisherId = trim((string) config('portals.proppit.publisher_external_id'));
-        abort_if($publisherId === '', 422, 'Configura PROPPIT_PUBLISHER_EXTERNAL_ID en .env.');
-
-        $publisherResult = $this->decorateResult(
-            $this->proppit->getPublisher($publisherId, $credential->access_token)
-        );
-
-        if (! $publisherResult['ok']) {
-            $error = $publisherResult['portal_error'];
-
-            return response()->json([
-                'message' => $error['message'].' '.$error['resolution'],
-                'Datos' => [
-                    'ok' => false,
-                    'api_url' => config('portals.proppit.api_url'),
-                    'country' => config('portals.proppit.country'),
-                    'publisher_external_id' => $publisherId,
-                    'error' => $error,
-                    'response' => $publisherResult['data'] ?? $publisherResult,
-                ],
-            ], $this->responseStatus($publisherResult));
-        }
 
         return response()->json(['Datos' => [
             'ok' => true,
             'api_url' => config('portals.proppit.api_url'),
             'country' => config('portals.proppit.country'),
             'publisher_external_id' => $publisherId,
-            'publishing_enabled' => (bool) ($publisherResult['data']['publishingEnabled'] ?? false),
             'expires_at' => $credential->access_token_expires_at?->toIso8601String(),
         ]]);
     }
@@ -276,13 +254,6 @@ class ProppitController extends Controller
         ];
 
         return $result;
-    }
-
-    protected function responseStatus(array $result): int
-    {
-        $status = (int) data_get($result, 'portal_error.status', 422);
-
-        return $status >= 400 && $status < 500 ? $status : 422;
     }
 
     protected function integration(): Integration

@@ -26,12 +26,14 @@ class RepairCiencuadrasCodes extends Command
 
         if ($codes->isEmpty()) {
             $this->error('Indica al menos un codigo: --code=101247');
+
             return self::FAILURE;
         }
 
         $credential = $this->credential($client);
         if (! $credential) {
             $this->error('No fue posible iniciar sesion en Ciencuadras.');
+
             return self::FAILURE;
         }
 
@@ -43,8 +45,8 @@ class RepairCiencuadrasCodes extends Command
 
             $this->line('');
             $this->info("{$code}");
-            $this->line("  Viejo con P: {$oldFullCode} => " . ($this->exists($oldResult) ? 'EXISTE' : 'no existe'));
-            $this->line("  Limpio: {$cleanFullCode} => " . ($this->exists($cleanResult) ? 'EXISTE' : 'no existe'));
+            $this->line("  Viejo con P: {$oldFullCode} => ".($this->exists($oldResult) ? 'EXISTE' : 'no existe'));
+            $this->line("  Limpio: {$cleanFullCode} => ".($this->exists($cleanResult) ? 'EXISTE' : 'no existe'));
 
             if (! $this->option('apply')) {
                 continue;
@@ -52,12 +54,14 @@ class RepairCiencuadrasCodes extends Command
 
             if ($this->option('replace-old')) {
                 $this->replaceOldCode($client, $mapper, $credential, $code, $oldFullCode);
+
                 continue;
             }
 
             $mapped = $mapper->fromCode($code, 'A');
             if ($mapped['errors']) {
-                $this->error('  No se envia update: ' . implode(' ', $mapped['errors']));
+                $this->error('  No se envia update: '.implode(' ', $mapped['errors']));
+
                 continue;
             }
 
@@ -67,13 +71,13 @@ class RepairCiencuadrasCodes extends Command
             $afterClean = $client->consultProperty($cleanFullCode, $credential);
             $afterOld = $client->consultProperty($oldFullCode, $credential);
 
-            $this->line('  Update limpio enviado: ' . (($update['ok'] ?? false) ? 'OK' : 'ERROR'));
-            $this->line('  idRequest: ' . ($idRequest ?: 'sin idRequest'));
+            $this->line('  Update limpio enviado: '.(($update['ok'] ?? false) ? 'OK' : 'ERROR'));
+            $this->line('  idRequest: '.($idRequest ?: 'sin idRequest'));
             if ($status) {
-                $this->line('  Estado solicitud: ' . $this->shortJson($status['data'] ?? []));
+                $this->line('  Estado solicitud: '.$this->shortJson($status['data'] ?? []));
             }
-            $this->line("  Despues limpio: {$cleanFullCode} => " . ($this->exists($afterClean) ? 'EXISTE' : 'no existe'));
-            $this->line("  Despues viejo: {$oldFullCode} => " . ($this->exists($afterOld) ? 'EXISTE' : 'no existe'));
+            $this->line("  Despues limpio: {$cleanFullCode} => ".($this->exists($afterClean) ? 'EXISTE' : 'no existe'));
+            $this->line("  Despues viejo: {$oldFullCode} => ".($this->exists($afterOld) ? 'EXISTE' : 'no existe'));
         }
 
         return self::SUCCESS;
@@ -89,29 +93,32 @@ class RepairCiencuadrasCodes extends Command
         $oldResult = $client->consultProperty($oldFullCode, $credential);
         if (! $this->exists($oldResult)) {
             $this->line("  No se envía despublicación: {$oldFullCode} no existe.");
+
             return;
         }
 
         if ($this->isInactive($oldResult)) {
             $this->line("  El código viejo {$oldFullCode} ya está inactivo. No se vuelve a enviar.");
+
             return;
         }
 
         $oldMapped = $mapper->fromCode($code, 'D');
         if ($oldMapped['errors']) {
-            $this->error('  No se despublica viejo: ' . implode(' ', $oldMapped['errors']));
+            $this->error('  No se despublica viejo: '.implode(' ', $oldMapped['errors']));
+
             return;
         }
 
-        $oldMapped['payload']['propertyCode'] = 'P' . $mapper->portalPropertyCode($code);
+        $oldMapped['payload']['propertyCode'] = $oldFullCode;
         $delete = $client->updateProperty($oldMapped['payload'], $credential);
         $deleteId = $client->extractIdRequest($delete['data'] ?? []);
         $deleteStatus = $deleteId ? $client->consultStatus(['idRequest' => $deleteId], $credential) : null;
 
-        $this->line('  Despublicacion viejo enviada: ' . (($delete['ok'] ?? false) ? 'OK' : 'ERROR'));
-        $this->line('  Viejo idRequest: ' . ($deleteId ?: 'sin idRequest'));
+        $this->line('  Despublicacion viejo enviada: '.(($delete['ok'] ?? false) ? 'OK' : 'ERROR'));
+        $this->line('  Viejo idRequest: '.($deleteId ?: 'sin idRequest'));
         if ($deleteStatus) {
-            $this->line('  Estado viejo: ' . $this->shortJson($deleteStatus['data'] ?? []));
+            $this->line('  Estado viejo: '.$this->shortJson($deleteStatus['data'] ?? []));
         }
         $this->line('  La publicación limpia queda bloqueada hasta que Ciencuadras deje de reportar el código viejo.');
     }

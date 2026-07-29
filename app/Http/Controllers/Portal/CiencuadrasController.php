@@ -7,6 +7,7 @@ use App\Models\Integration;
 use App\Models\PortalCredential;
 use App\Models\Property;
 use App\Models\PropertySyncStatus;
+use App\Services\Portals\CiencuadrasActiveProperties;
 use App\Services\Portals\CiencuadrasClient;
 use App\Services\Portals\CiencuadrasPropertyMapper;
 use Illuminate\Http\JsonResponse;
@@ -17,6 +18,7 @@ class CiencuadrasController extends Controller
     public function __construct(
         protected CiencuadrasClient $cc,
         protected CiencuadrasPropertyMapper $mapper,
+        protected CiencuadrasActiveProperties $activeProperties,
     ) {}
 
     public function login(Request $request): JsonResponse
@@ -116,6 +118,19 @@ class CiencuadrasController extends Controller
 
     protected function send(Request $request, string $code, string $action, string $status): JsonResponse
     {
+        if ($action === 'publish') {
+            $legacyState = $this->activeProperties->inspectLegacyCode(
+                $this->activeProperties->legacyCodeForSource($code),
+                fresh: true
+            );
+            abort_if($legacyState === null, 503, 'No fue posible verificar el código anterior en Ciencuadras.');
+            abort_if(
+                $legacyState['state'] === 'active',
+                409,
+                'Este inmueble todavía tiene un código P activo en Ciencuadras. Elimínalo y verifica la baja antes de publicar el código limpio.'
+            );
+        }
+
         $mapped = $this->mapper->fromCode($code, $status);
         $property = $mapped['property'];
         $payloadPropertyCode = (string) $mapped['payload']['propertyCode'];
@@ -480,7 +495,7 @@ class CiencuadrasController extends Controller
 
     protected function propertyWebUrl(string $code): string
     {
-        return 'https://sucasainmobiliaria.com.co/inmuebles/inmueble-' . rawurlencode($code);
+        return 'https://sucasainmobiliaria.com.co/inmuebles/inmueble-'.rawurlencode($code);
     }
 
     protected function verificationResponse(?string $idRequest, mixed $targetAction, mixed $targetStatus, mixed $statusData, mixed $propertyData): array

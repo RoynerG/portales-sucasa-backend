@@ -1,13 +1,14 @@
 <?php
 
-use App\Http\Controllers\Api\CatalogController;
 use App\Http\Controllers\Api\BrandingController;
+use App\Http\Controllers\Api\CatalogController;
 use App\Http\Controllers\Api\ConsultantController;
 use App\Http\Controllers\Api\IntegrationController;
 use App\Http\Controllers\Api\PropertyController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Portal\CiencuadrasController;
+use App\Http\Controllers\Portal\CiencuadrasLegacyController;
 use App\Http\Controllers\Portal\CiencuadrasMappingController;
 use App\Http\Controllers\Portal\FincaraizController;
 use App\Http\Controllers\Portal\MercadoLibreController;
@@ -28,12 +29,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Catálogos
     Route::prefix('catalog')->group(function () {
-        Route::get('/cities',          [CatalogController::class, 'cities']);
-        Route::get('/neighborhoods',   [CatalogController::class, 'neighborhoods']);
-        Route::get('/property-types',  [CatalogController::class, 'propertyTypes']);
-        Route::get('/transaction-types',[CatalogController::class, 'transactionTypes']);
-        Route::get('/destinations',     [CatalogController::class, 'destinations']);
-        Route::get('/features',        [CatalogController::class, 'features']);
+        Route::get('/cities', [CatalogController::class, 'cities']);
+        Route::get('/neighborhoods', [CatalogController::class, 'neighborhoods']);
+        Route::get('/property-types', [CatalogController::class, 'propertyTypes']);
+        Route::get('/transaction-types', [CatalogController::class, 'transactionTypes']);
+        Route::get('/destinations', [CatalogController::class, 'destinations']);
+        Route::get('/features', [CatalogController::class, 'features']);
     });
 
     // General
@@ -73,6 +74,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/properties/{code}/fincaraiz/pause', [FincaraizController::class, 'pause']);
 
         Route::post('/ciencuadras/login', [CiencuadrasController::class, 'login']);
+        Route::get('/ciencuadras/legacy-codes', [CiencuadrasLegacyController::class, 'index']);
+        Route::post('/ciencuadras/legacy-codes/delete', [CiencuadrasLegacyController::class, 'deleteSelected']);
+        Route::post('/ciencuadras/legacy-codes/verify', [CiencuadrasLegacyController::class, 'verify']);
         Route::get('/ciencuadras/mappings', [CiencuadrasMappingController::class, 'index']);
         Route::post('/ciencuadras/mappings/import-public-codes', [CiencuadrasMappingController::class, 'importPublicCodes']);
         Route::patch('/ciencuadras/mappings/cities/{id}', [CiencuadrasMappingController::class, 'updateCity']);

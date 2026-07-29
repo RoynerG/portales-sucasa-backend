@@ -13,6 +13,7 @@ use App\Http\Controllers\Portal\CiencuadrasMappingController;
 use App\Http\Controllers\Portal\FincaraizController;
 use App\Http\Controllers\Portal\MercadoLibreController;
 use App\Http\Controllers\Portal\PortalAutomationController;
+use App\Http\Controllers\Portal\PortalBulkController;
 use App\Http\Controllers\Portal\PortalErrorController;
 use App\Http\Controllers\Portal\ProppitController;
 use Illuminate\Support\Facades\Route;
@@ -77,12 +78,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/fincaraiz/client', [FincaraizController::class, 'clientInfo']);
         Route::get('/automation', [PortalAutomationController::class, 'index']);
         Route::get('/errors', [PortalErrorController::class, 'index']);
+        Route::get('/{portal}/bulk-candidates', [PortalBulkController::class, 'candidates']);
         Route::post('/properties/{code}/fincaraiz/publish', [FincaraizController::class, 'publish']);
         Route::post('/properties/{code}/fincaraiz/update', [FincaraizController::class, 'update']);
         Route::post('/properties/{code}/fincaraiz/pause', [FincaraizController::class, 'pause']);
 
         Route::post('/ciencuadras/login', [CiencuadrasController::class, 'login']);
-        Route::get('/ciencuadras/bulk-candidates', [CiencuadrasController::class, 'bulkCandidates']);
         Route::post('/ciencuadras/bulk', [CiencuadrasController::class, 'bulk']);
         Route::get('/ciencuadras/legacy-codes', [CiencuadrasLegacyController::class, 'index']);
         Route::post('/ciencuadras/legacy-codes/delete', [CiencuadrasLegacyController::class, 'deleteSelected']);

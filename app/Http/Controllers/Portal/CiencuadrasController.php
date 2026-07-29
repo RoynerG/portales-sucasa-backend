@@ -12,7 +12,6 @@ use App\Services\Portals\CiencuadrasClient;
 use App\Services\Portals\CiencuadrasPropertyMapper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 class CiencuadrasController extends Controller
 {
@@ -114,37 +113,6 @@ class CiencuadrasController extends Controller
             'source' => $mapped['source'],
             'errors' => $mapped['errors'],
             'payload' => $mapped['payload'],
-        ]]);
-    }
-
-    public function bulkCandidates(Request $request): JsonResponse
-    {
-        $data = $request->validate([
-            'action' => ['required', 'in:update,pause'],
-            'fresh' => ['nullable', 'boolean'],
-        ]);
-
-        $codes = $this->activeProperties->sourceCodes(
-            $request->boolean('fresh', true)
-        );
-        abort_if($codes === null, 503, 'No fue posible consultar el inventario de Ciencuadras.');
-
-        $existingCodes = DB::connection('wordpress')
-            ->table('wp_jet_cct_inmuebles')
-            ->where('cct_status', 'publish')
-            ->whereIn('codigo', $codes)
-            ->pluck('codigo')
-            ->map(fn ($code) => trim((string) $code))
-            ->filter()
-            ->unique()
-            ->values();
-
-        return response()->json(['Datos' => [
-            'portal' => 'ciencuadras',
-            'action' => $data['action'],
-            'environment' => config('portals.ciencuadras.environment'),
-            'total' => $existingCodes->count(),
-            'codes' => $existingCodes,
         ]]);
     }
 

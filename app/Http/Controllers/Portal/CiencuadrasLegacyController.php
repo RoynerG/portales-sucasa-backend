@@ -293,7 +293,8 @@ class CiencuadrasLegacyController extends Controller
                     'delete_pending' => 'delete_pending',
                     'error' => 'error',
                     'active' => 'active',
-                    'deleted' => 'deleted',
+                    // A code reported by the live inventory cannot remain deleted locally.
+                    'deleted' => 'active',
                     default => 'detected',
                 }
             : 'deleted';
@@ -326,7 +327,9 @@ class CiencuadrasLegacyController extends Controller
             ];
         });
 
-        if ($status !== '' && $status !== 'all') {
+        if ($status === 'present') {
+            $items = $items->whereIn('status', ['detected', 'active', 'delete_pending', 'error']);
+        } elseif ($status !== '' && $status !== 'all') {
             $items = $items->where('status', $status);
         }
 
@@ -400,6 +403,9 @@ class CiencuadrasLegacyController extends Controller
             if (! $operation->exists) {
                 $operation->status = 'detected';
                 $operation->last_error = null;
+            } elseif ($operation->status === 'deleted') {
+                $operation->status = 'active';
+                $operation->last_error = 'Ciencuadras volvió a reportar este código P como activo.';
             }
 
             $operation->save();

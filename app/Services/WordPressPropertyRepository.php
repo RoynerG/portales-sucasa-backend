@@ -71,9 +71,12 @@ class WordPressPropertyRepository
             ->values();
     }
 
-    public function portalSummary(): array
+    public function portalSummary(array $filters = []): array
     {
-        $codes = $this->baseQuery()
+        $query = $this->baseQuery();
+        $this->applyFilters($query, $filters);
+
+        $codes = $query
             ->pluck('codigo')
             ->map(fn ($code) => trim((string) $code))
             ->filter()

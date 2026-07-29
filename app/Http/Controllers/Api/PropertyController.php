@@ -23,41 +23,7 @@ class PropertyController extends Controller
         $query = Property::query()
             ->with(['city', 'neighborhood', 'propertyType', 'transactionType', 'consultant', 'images', 'syncStatuses.integration']);
 
-        if ($code = $request->query('codigo')) {
-            $query->where(function ($q) use ($code) {
-                $q->where('code', 'like', "%{$code}%")
-                    ->orWhere('title', 'like', "%{$code}%")
-                    ->orWhere('address', 'like', "%{$code}%");
-            });
-        }
-        if ($cityId = $request->query('ciudad_id')) {
-            $query->where('city_id', $cityId);
-        }
-        if ($typeId = $request->query('tipo_id')) {
-            $query->where('property_type_id', $typeId);
-        }
-        if ($txId = $request->query('transaccion_id')) {
-            $query->where('transaction_type_id', $txId);
-        }
-        if ($consultantId = $request->query('funcionario_id')) {
-            $query->whereHas('consultant', fn ($q) => $q->where('legacy_id', $consultantId)->orWhere('id', $consultantId));
-        }
-        if ($status = $request->query('estado')) {
-            $query->where('status', $status);
-        }
-        if ($min = $request->query('precio_min')) {
-            $query->where(function ($q) use ($min) {
-                $q->where('sale_price', '>=', $min)->orWhere('rent_price', '>=', $min);
-            });
-        }
-        if ($max = $request->query('precio_max')) {
-            $query->where(function ($q) use ($max) {
-                $q->where('sale_price', '<=', $max)->orWhere('rent_price', '<=', $max);
-            });
-        }
-        if ($bedrooms = $request->query('habitaciones')) {
-            $query->where('bedrooms', '>=', (int) $bedrooms);
-        }
+        $this->applyPropertyFilters($query, $request);
 
         $order = $request->query('orden', 'published_at');
         $direction = $request->query('dir', 'desc');
@@ -111,13 +77,16 @@ class PropertyController extends Controller
         return response()->json(['Datos' => $stats]);
     }
 
-    public function portalSummary(): JsonResponse
+    public function portalSummary(Request $request): JsonResponse
     {
         if ($this->wordpress->enabled()) {
-            return response()->json(['Datos' => $this->wordpress->portalSummary()]);
+            return response()->json(['Datos' => $this->wordpress->portalSummary($request->query())]);
         }
 
-        $properties = Property::query()
+        $query = Property::query();
+        $this->applyPropertyFilters($query, $request);
+
+        $properties = $query
             ->with(['syncStatuses' => fn ($query) => $query->latest('updated_at')])
             ->get();
 
@@ -258,6 +227,45 @@ class PropertyController extends Controller
             'expires_at' => ['nullable', 'date'],
             'consultant_id' => ['nullable', 'integer', 'exists:consultants,id'],
         ]);
+    }
+
+    private function applyPropertyFilters($query, Request $request): void
+    {
+        if ($code = $request->query('codigo')) {
+            $query->where(function ($q) use ($code) {
+                $q->where('code', 'like', "%{$code}%")
+                    ->orWhere('title', 'like', "%{$code}%")
+                    ->orWhere('address', 'like', "%{$code}%");
+            });
+        }
+        if ($cityId = $request->query('ciudad_id')) {
+            $query->where('city_id', $cityId);
+        }
+        if ($typeId = $request->query('tipo_id')) {
+            $query->where('property_type_id', $typeId);
+        }
+        if ($txId = $request->query('transaccion_id')) {
+            $query->where('transaction_type_id', $txId);
+        }
+        if ($consultantId = $request->query('funcionario_id')) {
+            $query->whereHas('consultant', fn ($q) => $q->where('legacy_id', $consultantId)->orWhere('id', $consultantId));
+        }
+        if ($status = $request->query('estado')) {
+            $query->where('status', $status);
+        }
+        if ($min = $request->query('precio_min')) {
+            $query->where(function ($q) use ($min) {
+                $q->where('sale_price', '>=', $min)->orWhere('rent_price', '>=', $min);
+            });
+        }
+        if ($max = $request->query('precio_max')) {
+            $query->where(function ($q) use ($max) {
+                $q->where('sale_price', '<=', $max)->orWhere('rent_price', '<=', $max);
+            });
+        }
+        if ($bedrooms = $request->query('habitaciones')) {
+            $query->where('bedrooms', '>=', (int) $bedrooms);
+        }
     }
 
     private function attachFeatures(Property $property, Request $request): void

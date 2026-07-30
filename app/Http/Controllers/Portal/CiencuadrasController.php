@@ -318,6 +318,8 @@ class CiencuadrasController extends Controller
 
     protected function send(Request $request, string $code, string $action, string $status): JsonResponse
     {
+        $requestedAction = $action;
+
         if ($action === 'publish') {
             $legacyState = $this->activeProperties->inspectLegacyCode(
                 $this->activeProperties->legacyCodeForSource($code),
@@ -335,8 +337,34 @@ class CiencuadrasController extends Controller
         $mapped = $this->mapper->fromCode($code, $status);
         $property = $mapped['property'];
         $payloadPropertyCode = (string) $mapped['payload']['propertyCode'];
-        if ($action !== 'publish') {
-            $mapped['payload']['propertyCode'] = $this->payloadCodeForExistingListing($property->id, $payloadPropertyCode, $status, $cred);
+        if ($action === 'update') {
+            $inspection = $this->activeProperties
+                ->inspectSourceCodes([$code], $cred)
+                ->get($this->mapper->portalPropertyCode($code));
+            $inspectionState = $inspection['state'] ?? 'unavailable';
+
+            abort_if(
+                $inspectionState === 'unavailable',
+                503,
+                'No fue posible comprobar el inmueble en Ciencuadras. Intenta nuevamente.'
+            );
+
+            if ($inspectionState === 'active') {
+                $mapped['payload']['propertyCode'] = $this->payloadCodeFromConsultCode(
+                    (string) $inspection['portal_code']
+                );
+            } else {
+                // Ciencuadras cannot update missing or deleted listings. Recreate it with the clean code.
+                $action = 'publish';
+                $mapped['payload']['propertyCode'] = $this->mapper->portalPropertyCode($payloadPropertyCode);
+            }
+        } elseif ($action !== 'publish') {
+            $mapped['payload']['propertyCode'] = $this->payloadCodeForExistingListing(
+                $property->id,
+                $payloadPropertyCode,
+                $status,
+                $cred
+            );
         }
 
         if ($mapped['errors']) {
@@ -401,6 +429,7 @@ class CiencuadrasController extends Controller
         }
 
         $response = [
+            'requested_action' => $requestedAction,
             'target_action' => $action,
             'target_status' => $status,
             'request' => $result['data'],
@@ -542,11 +571,6 @@ class CiencuadrasController extends Controller
             return 'error';
         }
 
-        if ($this->responseHasSuccess($statusResult['data'] ?? null)
-            && $this->extractPublicUrl($statusResult['data'] ?? [])) {
-            return 'synced';
-        }
-
         if ($this->responseIsPending($statusResult['data'] ?? null)
             || $this->responseHasSuccess($statusResult['data'] ?? null)
             || $this->responseHasNotFound($propertyResult['data'] ?? null)) {
@@ -592,11 +616,6 @@ class CiencuadrasController extends Controller
 
         if ($this->responseHasError($statusData)) {
             return 'error';
-        }
-
-        if ($this->responseHasSuccess($statusData)
-            && $this->extractPublicUrl(is_array($statusData) ? $statusData : [])) {
-            return 'synced';
         }
 
         if ($this->responseIsPending($statusData)

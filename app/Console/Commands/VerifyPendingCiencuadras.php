@@ -196,11 +196,6 @@ class VerifyPendingCiencuadras extends Command
             return 'error';
         }
 
-        if ($this->responseHasSuccess($statusData)
-            && $this->extractPublicUrl(is_array($statusData) ? $statusData : [])) {
-            return 'synced';
-        }
-
         if ($this->responseIsPending($statusData)) {
             return 'pending';
         }

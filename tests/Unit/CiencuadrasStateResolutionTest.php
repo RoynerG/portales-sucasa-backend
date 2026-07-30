@@ -93,7 +93,7 @@ class CiencuadrasStateResolutionTest extends TestCase
         $this->assertTrue($result['result']['ok']);
     }
 
-    public function test_public_status_url_wins_over_deleted_legacy_property_check(): void
+    public function test_public_status_url_stays_pending_until_clean_property_is_active(): void
     {
         $method = new ReflectionMethod(CiencuadrasController::class, 'verifiedSyncState');
         $controller = new CiencuadrasController(
@@ -102,7 +102,7 @@ class CiencuadrasStateResolutionTest extends TestCase
             Mockery::mock(CiencuadrasActiveProperties::class),
         );
 
-        $this->assertSame('synced', $method->invoke(
+        $this->assertSame('pending', $method->invoke(
             $controller,
             ['ok' => true, 'data' => [[
                 'propertyCode' => '22130-103104',

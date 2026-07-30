@@ -353,11 +353,6 @@ class AutoSyncCiencuadras extends Command
             return 'error';
         }
 
-        if ($this->responseHasSuccess($statusResult['data'] ?? null)
-            && $this->extractPublicUrl($statusResult['data'] ?? [])) {
-            return 'synced';
-        }
-
         if ($this->responseIsPending($statusResult['data'] ?? null)
             || $this->responseHasSuccess($statusResult['data'] ?? null)
             || $this->responseHasNotFound($propertyResult['data'] ?? null)) {

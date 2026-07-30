@@ -173,7 +173,7 @@ class AutoSyncCiencuadras extends Command
                     ? $client->consultStatus(['idRequest' => $idRequest], $credential)
                     : null;
                 $externalCode = $mapper->lookupCode($mapped['payload']['propertyCode']);
-                $consult = $this->consultPropertyWithFallback($client, $mapper, $externalCode, $credential);
+                $consult = $this->consultPropertyWithFallback($client, $mapper, $externalCode, $credential, $status);
                 $externalCode = $consult['code'];
                 $propertyResult = $consult['result'];
 
@@ -353,6 +353,11 @@ class AutoSyncCiencuadras extends Command
             return 'error';
         }
 
+        if ($this->responseHasSuccess($statusResult['data'] ?? null)
+            && $this->extractPublicUrl($statusResult['data'] ?? [])) {
+            return 'synced';
+        }
+
         if ($this->responseIsPending($statusResult['data'] ?? null)
             || $this->responseHasSuccess($statusResult['data'] ?? null)
             || $this->responseHasNotFound($propertyResult['data'] ?? null)) {
@@ -381,20 +386,25 @@ class AutoSyncCiencuadras extends Command
         CiencuadrasClient $client,
         CiencuadrasPropertyMapper $mapper,
         string $code,
-        PortalCredential $credential
+        PortalCredential $credential,
+        ?string $targetStatus = null
     ): array {
         $first = null;
+        $isInactiveTarget = in_array($targetStatus, ['I', 'D'], true);
 
         foreach ($this->consultCodeCandidates($mapper, $code) as $candidate) {
             $result = $client->consultProperty($candidate, $credential);
             $first ??= ['code' => $candidate, 'result' => $result];
             $data = $result['data'] ?? null;
 
-            if ($this->responseHasActive($data) || $this->responseHasInactive($data)) {
+            if ($this->responseHasActive($data)
+                || ($isInactiveTarget && ($this->responseHasInactive($data) || $this->responseHasNotFound($data)))) {
                 return ['code' => $candidate, 'result' => $result];
             }
 
-            if (! $this->responseHasNotFound($data) && ($result['ok'] ?? false)) {
+            if (! $this->responseHasInactive($data)
+                && ! $this->responseHasNotFound($data)
+                && ($result['ok'] ?? false)) {
                 return ['code' => $candidate, 'result' => $result];
             }
         }

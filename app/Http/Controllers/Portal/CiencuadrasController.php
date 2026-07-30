@@ -74,7 +74,7 @@ class CiencuadrasController extends Controller
             ? $this->cc->consultStatus(['idRequest' => $idRequest], $cred)
             : null;
         $consultCode = $this->consultCodeForStatus($status, $externalCode);
-        $consult = $this->consultPropertyWithFallback($consultCode, $cred);
+        $consult = $this->consultPropertyWithFallback($consultCode, $cred, $targetStatus);
         $consultCode = $consult['code'];
         $propertyResult = $consult['result'];
 
@@ -340,7 +340,7 @@ class CiencuadrasController extends Controller
         $consultCode = $reportedCode
             ? $this->mapper->lookupCode($reportedCode)
             : $this->consultCodeFromPayload((string) $mapped['payload']['propertyCode']);
-        $consult = $this->consultPropertyWithFallback($consultCode, $cred);
+        $consult = $this->consultPropertyWithFallback($consultCode, $cred, $status);
         $consultCode = $consult['code'];
         $propertyResult = $consult['result'];
 
@@ -483,6 +483,11 @@ class CiencuadrasController extends Controller
             return 'error';
         }
 
+        if ($this->responseHasSuccess($statusResult['data'] ?? null)
+            && $this->extractPublicUrl($statusResult['data'] ?? [])) {
+            return 'synced';
+        }
+
         if ($this->responseIsPending($statusResult['data'] ?? null)
             || $this->responseHasSuccess($statusResult['data'] ?? null)
             || $this->responseHasNotFound($propertyResult['data'] ?? null)) {
@@ -528,6 +533,11 @@ class CiencuadrasController extends Controller
 
         if ($this->responseHasError($statusData)) {
             return 'error';
+        }
+
+        if ($this->responseHasSuccess($statusData)
+            && $this->extractPublicUrl(is_array($statusData) ? $statusData : [])) {
+            return 'synced';
         }
 
         if ($this->responseIsPending($statusData)
@@ -579,20 +589,24 @@ class CiencuadrasController extends Controller
         return $this->mapper->lookupCode($payloadCode);
     }
 
-    protected function consultPropertyWithFallback(string $code, PortalCredential $cred): array
+    protected function consultPropertyWithFallback(string $code, PortalCredential $cred, ?string $targetStatus = null): array
     {
         $first = null;
+        $isInactiveTarget = in_array($targetStatus, ['I', 'D'], true);
 
         foreach ($this->consultCodeCandidates($code) as $candidate) {
             $result = $this->cc->consultProperty($candidate, $cred);
             $first ??= ['code' => $candidate, 'result' => $result];
             $data = $result['data'] ?? null;
 
-            if ($this->responseHasActive($data) || $this->responseHasInactive($data)) {
+            if ($this->responseHasActive($data)
+                || ($isInactiveTarget && ($this->responseHasInactive($data) || $this->responseHasNotFound($data)))) {
                 return ['code' => $candidate, 'result' => $result];
             }
 
-            if (! $this->responseHasNotFound($data) && ($result['ok'] ?? false)) {
+            if (! $this->responseHasInactive($data)
+                && ! $this->responseHasNotFound($data)
+                && ($result['ok'] ?? false)) {
                 return ['code' => $candidate, 'result' => $result];
             }
         }

@@ -45,4 +45,16 @@ class CiencuadrasPropertyCodeTest extends TestCase
             'status' => 'A',
         ]]);
     }
+
+    public function test_client_allows_a_p_code_when_updating_an_existing_listing(): void
+    {
+        $method = new ReflectionMethod(CiencuadrasClient::class, 'propertyBatch');
+
+        $batch = $method->invoke(app(CiencuadrasClient::class), [[
+            'propertyCode' => 'P101247',
+            'status' => 'A',
+        ]], false);
+
+        $this->assertSame('P101247', $batch[0]['propertyCode']);
+    }
 }

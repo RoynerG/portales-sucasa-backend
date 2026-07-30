@@ -574,14 +574,14 @@ class CiencuadrasController extends Controller
         $existingCode = $this->extractPropertyCode($status?->last_response ?? null);
 
         if ($existingCode) {
-            if (in_array($targetStatus, ['I', 'D'], true) && preg_match('/(?:^|-)P\d+$/i', $existingCode)) {
-                return $this->mapper->legacyLookupCode($existingCode);
+            if (preg_match('/(?:^|-)P\d+$/i', $existingCode)) {
+                return 'P'.$this->mapper->portalPropertyCode($existingCode);
             }
 
-            return $this->mapper->lookupCode($existingCode);
+            return $this->mapper->portalPropertyCode($existingCode);
         }
 
-        return $this->mapper->lookupCode($default);
+        return $this->mapper->portalPropertyCode($default);
     }
 
     protected function consultCodeFromPayload(string $payloadCode): string

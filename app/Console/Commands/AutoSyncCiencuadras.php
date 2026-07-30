@@ -146,8 +146,8 @@ class AutoSyncCiencuadras extends Command
 
                 if ($action !== 'publish' && $sync?->external_id) {
                     $mapped['payload']['propertyCode'] = preg_match('/(?:^|-)P\d+$/i', $sync->external_id)
-                        ? $mapper->legacyLookupCode($sync->external_id)
-                        : $mapper->lookupCode($sync->external_id);
+                        ? 'P'.$mapper->portalPropertyCode($sync->external_id)
+                        : $mapper->portalPropertyCode($sync->external_id);
                 }
 
                 if ($mapped['errors']) {

@@ -37,7 +37,7 @@ class CiencuadrasClient
 
     public function insertProperty(array $payload, PortalCredential $cred): array
     {
-        return $this->request('POST', '/api/insert', $this->propertyBatch($payload), $cred);
+        return $this->request('POST', '/api/insert', $this->propertyBatch($payload, rejectLegacyActive: true), $cred);
     }
 
     public function consultProperty(string $propertyCode, PortalCredential $cred): array
@@ -98,7 +98,7 @@ class CiencuadrasClient
 
     public function updateProperty(array $payload, PortalCredential $cred): array
     {
-        return $this->request('POST', '/api/update', $this->propertyBatch($payload), $cred);
+        return $this->request('POST', '/api/update', $this->propertyBatch($payload, rejectLegacyActive: false), $cred);
     }
 
     public function extractToken(array $data): ?string
@@ -124,7 +124,7 @@ class CiencuadrasClient
         return null;
     }
 
-    protected function propertyBatch(array $payload): array
+    protected function propertyBatch(array $payload, bool $rejectLegacyActive = true): array
     {
         $batch = array_is_list($payload) ? $payload : [$payload];
 
@@ -132,7 +132,7 @@ class CiencuadrasClient
             $code = trim((string) ($property['propertyCode'] ?? ''));
             $status = strtoupper(trim((string) ($property['status'] ?? 'A')));
 
-            if ($status === 'A' && preg_match('/(?:^|-)P\d+$/i', $code)) {
+            if ($rejectLegacyActive && $status === 'A' && preg_match('/(?:^|-)P\d+$/i', $code)) {
                 throw new \InvalidArgumentException(
                     "Se bloqueó el envío del código legado {$code}. Las publicaciones activas deben usar el código limpio."
                 );

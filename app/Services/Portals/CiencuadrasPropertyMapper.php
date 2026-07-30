@@ -92,7 +92,7 @@ class CiencuadrasPropertyMapper
             'address' => $this->text($row->direccion ?: $row->direccion_fisica ?: $row->barrio),
             'showAddress' => config('portals.ciencuadras.show_address') ? 1 : 0,
             'stratum' => max(0, min(8, (int) ($this->integer($row->estrato) ?? 0))),
-            'propertyCode' => $this->lookupCode((string) $row->codigo),
+            'propertyCode' => $this->portalPropertyCode((string) $row->codigo),
             'latitude' => $this->number($row->latitud),
             'longitude' => $this->number($row->longitud),
             'sellingPrice' => $this->sellingPrice($row, $transactionId),

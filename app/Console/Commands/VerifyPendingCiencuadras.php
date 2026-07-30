@@ -75,7 +75,9 @@ class VerifyPendingCiencuadras extends Command
             $statusResult = $idRequest
                 ? $client->consultStatus(['idRequest' => $idRequest], $credential)
                 : null;
-            $propertyResult = $client->consultProperty($externalCode, $credential);
+            $consult = $this->consultPropertyWithFallback($client, $mapper, $externalCode, $credential);
+            $externalCode = $consult['code'];
+            $propertyResult = $consult['result'];
 
             $response = $this->verificationResponse($idRequest, $targetAction, $targetStatus, $statusResult['data'] ?? null, $propertyResult['data'] ?? null);
             $syncStatus = $this->syncState(
@@ -191,6 +193,39 @@ class VerifyPendingCiencuadras extends Command
     protected function responseIsPending($data): bool
     {
         return str_contains(strtolower(json_encode($data ?? [])), 'pending');
+    }
+
+    protected function consultPropertyWithFallback(
+        CiencuadrasClient $client,
+        CiencuadrasPropertyMapper $mapper,
+        string $code,
+        PortalCredential $credential
+    ): array {
+        $first = null;
+
+        foreach ($this->consultCodeCandidates($mapper, $code) as $candidate) {
+            $result = $client->consultProperty($candidate, $credential);
+            $first ??= ['code' => $candidate, 'result' => $result];
+            $data = $result['data'] ?? null;
+
+            if ($this->responseHasActive($data) || $this->responseHasInactive($data)) {
+                return ['code' => $candidate, 'result' => $result];
+            }
+
+            if (! $this->responseHasNotFound($data) && ($result['ok'] ?? false)) {
+                return ['code' => $candidate, 'result' => $result];
+            }
+        }
+
+        return $first ?? ['code' => $mapper->lookupCode($code), 'result' => ['ok' => false, 'data' => null]];
+    }
+
+    protected function consultCodeCandidates(CiencuadrasPropertyMapper $mapper, string $code): array
+    {
+        return array_values(array_unique([
+            $mapper->lookupCode($code),
+            $mapper->legacyLookupCode($code),
+        ]));
     }
 
     protected function responseHasSuccess($data): bool

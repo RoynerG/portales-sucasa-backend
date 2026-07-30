@@ -74,7 +74,9 @@ class CiencuadrasController extends Controller
             ? $this->cc->consultStatus(['idRequest' => $idRequest], $cred)
             : null;
         $consultCode = $this->consultCodeForStatus($status, $externalCode);
-        $propertyResult = $this->cc->consultProperty($consultCode, $cred);
+        $consult = $this->consultPropertyWithFallback($consultCode, $cred);
+        $consultCode = $consult['code'];
+        $propertyResult = $consult['result'];
 
         $response = $this->verificationResponse($idRequest, $targetAction, $targetStatus, $statusResult['data'] ?? null, $propertyResult['data'] ?? null);
         $syncStatus = $this->verifiedSyncState($statusResult, $propertyResult, $status?->sync_status, $targetStatus);
@@ -193,7 +195,8 @@ class CiencuadrasController extends Controller
                 if ($action !== 'publish') {
                     $mapped['payload']['propertyCode'] = $this->payloadCodeForExistingListing(
                         $mapped['property']->id,
-                        (string) $mapped['payload']['propertyCode']
+                        (string) $mapped['payload']['propertyCode'],
+                        $targetStatus
                     );
                 }
 
@@ -306,7 +309,7 @@ class CiencuadrasController extends Controller
         $property = $mapped['property'];
         $payloadPropertyCode = (string) $mapped['payload']['propertyCode'];
         if ($action !== 'publish') {
-            $mapped['payload']['propertyCode'] = $this->payloadCodeForExistingListing($property->id, $payloadPropertyCode);
+            $mapped['payload']['propertyCode'] = $this->payloadCodeForExistingListing($property->id, $payloadPropertyCode, $status);
         }
 
         if ($mapped['errors']) {
@@ -337,7 +340,9 @@ class CiencuadrasController extends Controller
         $consultCode = $reportedCode
             ? $this->mapper->lookupCode($reportedCode)
             : $this->consultCodeFromPayload((string) $mapped['payload']['propertyCode']);
-        $propertyResult = $this->cc->consultProperty($consultCode, $cred);
+        $consult = $this->consultPropertyWithFallback($consultCode, $cred);
+        $consultCode = $consult['code'];
+        $propertyResult = $consult['result'];
 
         $response = [
             'target_action' => $action,
@@ -549,7 +554,7 @@ class CiencuadrasController extends Controller
         return $this->mapper->lookupCode($existingCode);
     }
 
-    protected function payloadCodeForExistingListing(int $propertyId, string $default): string
+    protected function payloadCodeForExistingListing(int $propertyId, string $default, string $targetStatus = 'A'): string
     {
         $status = PropertySyncStatus::where([
             'property_id' => $propertyId,
@@ -559,15 +564,48 @@ class CiencuadrasController extends Controller
         $existingCode = $this->extractPropertyCode($status?->last_response ?? null);
 
         if ($existingCode) {
-            return $this->mapper->portalPropertyCode($existingCode);
+            if (in_array($targetStatus, ['I', 'D'], true) && preg_match('/(?:^|-)P\d+$/i', $existingCode)) {
+                return $this->mapper->legacyLookupCode($existingCode);
+            }
+
+            return $this->mapper->lookupCode($existingCode);
         }
 
-        return $this->mapper->portalPropertyCode($default);
+        return $this->mapper->lookupCode($default);
     }
 
     protected function consultCodeFromPayload(string $payloadCode): string
     {
         return $this->mapper->lookupCode($payloadCode);
+    }
+
+    protected function consultPropertyWithFallback(string $code, PortalCredential $cred): array
+    {
+        $first = null;
+
+        foreach ($this->consultCodeCandidates($code) as $candidate) {
+            $result = $this->cc->consultProperty($candidate, $cred);
+            $first ??= ['code' => $candidate, 'result' => $result];
+            $data = $result['data'] ?? null;
+
+            if ($this->responseHasActive($data) || $this->responseHasInactive($data)) {
+                return ['code' => $candidate, 'result' => $result];
+            }
+
+            if (! $this->responseHasNotFound($data) && ($result['ok'] ?? false)) {
+                return ['code' => $candidate, 'result' => $result];
+            }
+        }
+
+        return $first ?? ['code' => $this->mapper->lookupCode($code), 'result' => ['ok' => false, 'data' => null]];
+    }
+
+    protected function consultCodeCandidates(string $code): array
+    {
+        return array_values(array_unique([
+            $this->mapper->lookupCode($code),
+            $this->mapper->legacyLookupCode($code),
+        ]));
     }
 
     protected function extractPropertyCode($data): ?string

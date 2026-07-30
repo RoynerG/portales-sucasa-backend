@@ -20,6 +20,7 @@ class CiencuadrasPropertyCodeTest extends TestCase
 
         $this->assertSame($expected, $mapper->portalPropertyCode($source));
         $this->assertSame('22130-'.$expected, $mapper->externalCode($source));
+        $this->assertSame('22130-P'.$expected, $mapper->legacyLookupCode($source));
     }
 
     public static function propertyCodes(): array

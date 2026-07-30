@@ -144,6 +144,12 @@ class AutoSyncCiencuadras extends Command
                 $mapped = $mapper->fromCode($code, $status);
                 $property = $mapped['property'];
 
+                if ($action !== 'publish' && $sync?->external_id) {
+                    $mapped['payload']['propertyCode'] = preg_match('/(?:^|-)P\d+$/i', $sync->external_id)
+                        ? $mapper->legacyLookupCode($sync->external_id)
+                        : $mapper->lookupCode($sync->external_id);
+                }
+
                 if ($mapped['errors']) {
                     $this->saveStatus(
                         $property->id,
@@ -167,9 +173,9 @@ class AutoSyncCiencuadras extends Command
                     ? $client->consultStatus(['idRequest' => $idRequest], $credential)
                     : null;
                 $externalCode = $mapper->lookupCode($mapped['payload']['propertyCode']);
-                $propertyResult = $result['ok']
-                    ? $client->consultProperty($externalCode, $credential)
-                    : null;
+                $consult = $this->consultPropertyWithFallback($client, $mapper, $externalCode, $credential);
+                $externalCode = $consult['code'];
+                $propertyResult = $consult['result'];
 
                 $response = [
                     'target_action' => $action,
@@ -369,6 +375,39 @@ class AutoSyncCiencuadras extends Command
             || str_contains($json, 'procesado')
             || str_contains($json, 'éxito')
             || str_contains($json, 'exito');
+    }
+
+    protected function consultPropertyWithFallback(
+        CiencuadrasClient $client,
+        CiencuadrasPropertyMapper $mapper,
+        string $code,
+        PortalCredential $credential
+    ): array {
+        $first = null;
+
+        foreach ($this->consultCodeCandidates($mapper, $code) as $candidate) {
+            $result = $client->consultProperty($candidate, $credential);
+            $first ??= ['code' => $candidate, 'result' => $result];
+            $data = $result['data'] ?? null;
+
+            if ($this->responseHasActive($data) || $this->responseHasInactive($data)) {
+                return ['code' => $candidate, 'result' => $result];
+            }
+
+            if (! $this->responseHasNotFound($data) && ($result['ok'] ?? false)) {
+                return ['code' => $candidate, 'result' => $result];
+            }
+        }
+
+        return $first ?? ['code' => $mapper->lookupCode($code), 'result' => ['ok' => false, 'data' => null]];
+    }
+
+    protected function consultCodeCandidates(CiencuadrasPropertyMapper $mapper, string $code): array
+    {
+        return array_values(array_unique([
+            $mapper->lookupCode($code),
+            $mapper->legacyLookupCode($code),
+        ]));
     }
 
     protected function responseHasActive($data): bool

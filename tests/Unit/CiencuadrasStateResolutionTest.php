@@ -5,6 +5,7 @@ namespace Tests\Unit;
 use App\Console\Commands\AutoSyncCiencuadras;
 use App\Console\Commands\VerifyPendingCiencuadras;
 use App\Http\Controllers\Portal\CiencuadrasController;
+use App\Models\PortalCredential;
 use App\Services\Portals\CiencuadrasActiveProperties;
 use App\Services\Portals\CiencuadrasClient;
 use App\Services\Portals\CiencuadrasPropertyMapper;
@@ -57,5 +58,38 @@ class CiencuadrasStateResolutionTest extends TestCase
             'A',
             ['ok' => true, 'data' => ['message' => ['active' => 'Activo', 'status' => '0']]]
         ));
+    }
+
+    public function test_manual_verification_falls_back_to_legacy_p_code(): void
+    {
+        config(['portals.ciencuadras.property_code_prefix' => '22130-']);
+
+        $client = Mockery::mock(CiencuadrasClient::class);
+        $client->shouldReceive('consultProperty')
+            ->once()
+            ->with('22130-103104', Mockery::type(PortalCredential::class))
+            ->andReturn(['ok' => true, 'data' => [
+                'message' => 'El inmueble que esta buscando no existe',
+                'status' => 'error',
+                'statusCode' => 126,
+            ]]);
+        $client->shouldReceive('consultProperty')
+            ->once()
+            ->with('22130-P103104', Mockery::type(PortalCredential::class))
+            ->andReturn(['ok' => true, 'data' => [
+                'message' => [['propertyCode' => '22130-P103104', 'active' => 'Activo', 'status' => '0']],
+            ]]);
+
+        $controller = new CiencuadrasController(
+            $client,
+            app(CiencuadrasPropertyMapper::class),
+            Mockery::mock(CiencuadrasActiveProperties::class),
+        );
+        $method = new ReflectionMethod(CiencuadrasController::class, 'consultPropertyWithFallback');
+
+        $result = $method->invoke($controller, '103104', new PortalCredential(['access_token' => 'token']));
+
+        $this->assertSame('22130-P103104', $result['code']);
+        $this->assertTrue($result['result']['ok']);
     }
 }

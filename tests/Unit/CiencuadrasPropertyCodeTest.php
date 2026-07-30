@@ -57,4 +57,41 @@ class CiencuadrasPropertyCodeTest extends TestCase
 
         $this->assertSame('P101247', $batch[0]['propertyCode']);
     }
+
+    public function test_mapper_uses_approximate_coordinates_when_address_is_hidden(): void
+    {
+        config([
+            'portals.ciencuadras.show_address' => false,
+            'portals.ciencuadras.approximate_location_precision' => 2,
+            'portals.ciencuadras.default_latitude' => null,
+            'portals.ciencuadras.default_longitude' => null,
+        ]);
+
+        $method = new ReflectionMethod(CiencuadrasPropertyMapper::class, 'coordinates');
+        $coordinates = $method->invoke(app(CiencuadrasPropertyMapper::class), (object) [
+            'latitud' => '10.5372474',
+            'longitud' => '-75.3975306',
+            'barrio' => 'Barrio inexistente para test',
+            'ciudad' => 'Ciudad inexistente para test',
+        ]);
+
+        $this->assertSame(10.54, $coordinates['latitude']);
+        $this->assertSame(-75.4, $coordinates['longitude']);
+    }
+
+    public function test_mapper_keeps_exact_coordinates_when_address_is_visible(): void
+    {
+        config(['portals.ciencuadras.show_address' => true]);
+
+        $method = new ReflectionMethod(CiencuadrasPropertyMapper::class, 'coordinates');
+        $coordinates = $method->invoke(app(CiencuadrasPropertyMapper::class), (object) [
+            'latitud' => '10.5372474',
+            'longitud' => '-75.3975306',
+            'barrio' => 'Bayunca',
+            'ciudad' => 'Cartagena',
+        ]);
+
+        $this->assertSame(10.5372474, $coordinates['latitude']);
+        $this->assertSame(-75.3975306, $coordinates['longitude']);
+    }
 }

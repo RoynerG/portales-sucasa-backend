@@ -83,6 +83,7 @@ class CiencuadrasPropertyMapper
         $images = $this->media($row);
         $localityId = $this->localityId($row);
         $advisor = $this->advisorContact();
+        $coordinates = $this->coordinates($row);
 
         $payload = [
             'cityId' => $this->cityId($row),
@@ -93,8 +94,8 @@ class CiencuadrasPropertyMapper
             'showAddress' => config('portals.ciencuadras.show_address') ? 1 : 0,
             'stratum' => max(0, min(8, (int) ($this->integer($row->estrato) ?? 0))),
             'propertyCode' => $this->portalPropertyCode((string) $row->codigo),
-            'latitude' => $this->number($row->latitud),
-            'longitude' => $this->number($row->longitud),
+            'latitude' => $coordinates['latitude'],
+            'longitude' => $coordinates['longitude'],
             'sellingPrice' => $this->sellingPrice($row, $transactionId),
             'leasingFee' => $this->leasingFee($row, $transactionId),
             'additionalInfo' => $description,
@@ -329,6 +330,93 @@ class CiencuadrasPropertyMapper
         $fallback = (int) config('portals.ciencuadras.default_locality_id');
 
         return $fallback > 0 ? $fallback : null;
+    }
+
+    protected function coordinates(stdClass $row): array
+    {
+        $exact = [
+            'latitude' => $this->number($row->latitud),
+            'longitude' => $this->number($row->longitud),
+        ];
+
+        if (config('portals.ciencuadras.show_address')) {
+            return $exact;
+        }
+
+        foreach ([$this->neighborhoodCoordinates($row), $this->cityCoordinates($row), $this->defaultCoordinates()] as $coordinates) {
+            if ($this->hasCoordinates($coordinates)) {
+                return $this->approximateCoordinates($coordinates);
+            }
+        }
+
+        return $this->approximateCoordinates($exact);
+    }
+
+    protected function approximateCoordinates(array $coordinates): array
+    {
+        $precision = max(0, min(4, (int) config('portals.ciencuadras.approximate_location_precision', 2)));
+
+        return [
+            'latitude' => $coordinates['latitude'] === null ? null : round((float) $coordinates['latitude'], $precision),
+            'longitude' => $coordinates['longitude'] === null ? null : round((float) $coordinates['longitude'], $precision),
+        ];
+    }
+
+    protected function neighborhoodCoordinates(stdClass $row): ?array
+    {
+        if (! Schema::connection('wordpress')->hasColumn('wp_jet_cct_barrios', 'latitud')
+            || ! Schema::connection('wordpress')->hasColumn('wp_jet_cct_barrios', 'longitud')) {
+            return null;
+        }
+
+        $query = DB::connection('wordpress')
+            ->table('wp_jet_cct_barrios')
+            ->where('cct_status', 'publish')
+            ->whereRaw('LOWER(TRIM(barrio)) = ?', [strtolower(trim((string) $row->barrio))]);
+
+        if ($row->ciudad) {
+            $query->whereRaw('LOWER(TRIM(ciudad)) = ?', [strtolower(trim((string) $row->ciudad))]);
+        }
+
+        $neighborhood = $query->select(['latitud', 'longitud'])->first();
+
+        return $neighborhood ? [
+            'latitude' => $this->number($neighborhood->latitud),
+            'longitude' => $this->number($neighborhood->longitud),
+        ] : null;
+    }
+
+    protected function cityCoordinates(stdClass $row): ?array
+    {
+        if (! Schema::connection('wordpress')->hasColumn('wp_jet_cct_ciudades', 'latitud')
+            || ! Schema::connection('wordpress')->hasColumn('wp_jet_cct_ciudades', 'longitud')) {
+            return null;
+        }
+
+        $city = DB::connection('wordpress')
+            ->table('wp_jet_cct_ciudades')
+            ->whereRaw('LOWER(TRIM(ciudad)) = ?', [strtolower(trim((string) $row->ciudad))])
+            ->select(['latitud', 'longitud'])
+            ->first();
+
+        return $city ? [
+            'latitude' => $this->number($city->latitud),
+            'longitude' => $this->number($city->longitud),
+        ] : null;
+    }
+
+    protected function defaultCoordinates(): ?array
+    {
+        return [
+            'latitude' => $this->number(config('portals.ciencuadras.default_latitude')),
+            'longitude' => $this->number(config('portals.ciencuadras.default_longitude')),
+        ];
+    }
+
+    protected function hasCoordinates(?array $coordinates): bool
+    {
+        return is_numeric($coordinates['latitude'] ?? null)
+            && is_numeric($coordinates['longitude'] ?? null);
     }
 
     protected function media(stdClass $row): array

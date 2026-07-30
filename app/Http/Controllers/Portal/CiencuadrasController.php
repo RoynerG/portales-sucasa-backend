@@ -196,7 +196,8 @@ class CiencuadrasController extends Controller
                     $mapped['payload']['propertyCode'] = $this->payloadCodeForExistingListing(
                         $mapped['property']->id,
                         (string) $mapped['payload']['propertyCode'],
-                        $targetStatus
+                        $targetStatus,
+                        $credential
                     );
                 }
 
@@ -305,11 +306,12 @@ class CiencuadrasController extends Controller
             );
         }
 
+        $cred = $this->credential($request);
         $mapped = $this->mapper->fromCode($code, $status);
         $property = $mapped['property'];
         $payloadPropertyCode = (string) $mapped['payload']['propertyCode'];
         if ($action !== 'publish') {
-            $mapped['payload']['propertyCode'] = $this->payloadCodeForExistingListing($property->id, $payloadPropertyCode, $status);
+            $mapped['payload']['propertyCode'] = $this->payloadCodeForExistingListing($property->id, $payloadPropertyCode, $status, $cred);
         }
 
         if ($mapped['errors']) {
@@ -326,7 +328,6 @@ class CiencuadrasController extends Controller
             ]], 422);
         }
 
-        $cred = $this->credential($request);
         $result = $action === 'publish'
             ? $this->cc->insertProperty($mapped['payload'], $cred)
             : $this->cc->updateProperty($mapped['payload'], $cred);
@@ -564,7 +565,7 @@ class CiencuadrasController extends Controller
         return $this->mapper->lookupCode($existingCode);
     }
 
-    protected function payloadCodeForExistingListing(int $propertyId, string $default, string $targetStatus = 'A'): string
+    protected function payloadCodeForExistingListing(int $propertyId, string $default, string $targetStatus = 'A', ?PortalCredential $credential = null): string
     {
         $status = PropertySyncStatus::where([
             'property_id' => $propertyId,
@@ -572,6 +573,15 @@ class CiencuadrasController extends Controller
             'environment' => config('portals.ciencuadras.environment'),
         ])->first();
         $existingCode = $this->extractPropertyCode($status?->last_response ?? null);
+
+        if ($credential) {
+            $resolvedCode = $this->activePayloadCodeForExistingListing($existingCode ?: $default, $credential, $targetStatus)
+                ?: $this->activePayloadCodeForExistingListing($default, $credential, $targetStatus);
+
+            if ($resolvedCode) {
+                return $resolvedCode;
+            }
+        }
 
         if ($existingCode) {
             if (preg_match('/(?:^|-)P\d+$/i', $existingCode)) {
@@ -582,6 +592,35 @@ class CiencuadrasController extends Controller
         }
 
         return $this->mapper->portalPropertyCode($default);
+    }
+
+    protected function activePayloadCodeForExistingListing(string $code, PortalCredential $credential, string $targetStatus): ?string
+    {
+        $isInactiveTarget = in_array($targetStatus, ['I', 'D'], true);
+
+        foreach ($this->consultCodeCandidates($code) as $candidate) {
+            $result = $this->cc->consultProperty($candidate, $credential);
+            $data = $result['data'] ?? null;
+
+            if ($this->responseHasActive($data)
+                || ($isInactiveTarget && $this->responseHasInactive($data))) {
+                return $this->payloadCodeFromConsultCode($this->extractPropertyCode($data) ?: $candidate);
+            }
+        }
+
+        return null;
+    }
+
+    protected function payloadCodeFromConsultCode(string $consultCode): string
+    {
+        $prefix = (string) config('portals.ciencuadras.property_code_prefix', '22130-');
+        $code = trim($consultCode);
+
+        if ($prefix !== '' && str_starts_with(strtolower($code), strtolower($prefix))) {
+            return substr($code, strlen($prefix));
+        }
+
+        return $code;
     }
 
     protected function consultCodeFromPayload(string $payloadCode): string

@@ -2,8 +2,11 @@
 
 namespace Tests\Unit;
 
+use App\Http\Controllers\Portal\CiencuadrasController;
 use App\Services\Portals\CiencuadrasClient;
+use App\Services\Portals\CiencuadrasActiveProperties;
 use App\Services\Portals\CiencuadrasPropertyMapper;
+use App\Models\PortalCredential;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use ReflectionMethod;
@@ -93,5 +96,65 @@ class CiencuadrasPropertyCodeTest extends TestCase
 
         $this->assertSame(10.5372474, $coordinates['latitude']);
         $this->assertSame(-75.3975306, $coordinates['longitude']);
+    }
+
+    public function test_active_properties_detects_a_legacy_p_listing_for_updates(): void
+    {
+        config(['portals.ciencuadras.property_code_prefix' => '22130-']);
+
+        $service = new CiencuadrasActiveProperties(new FakeCiencuadrasLegacyClient);
+        $result = $service->inspectSourceCodes(['103222'], new PortalCredential(['access_token' => 'token']));
+
+        $this->assertSame('active', $result->get('103222')['state']);
+        $this->assertSame('22130-P103222', $result->get('103222')['portal_code']);
+    }
+
+    public function test_update_payload_uses_the_legacy_p_code_when_that_is_the_active_listing(): void
+    {
+        config(['portals.ciencuadras.property_code_prefix' => '22130-']);
+
+        $client = new FakeCiencuadrasLegacyClient;
+        $controller = new CiencuadrasController(
+            $client,
+            app(CiencuadrasPropertyMapper::class),
+            new CiencuadrasActiveProperties($client)
+        );
+        $method = new ReflectionMethod(CiencuadrasController::class, 'activePayloadCodeForExistingListing');
+
+        $code = $method->invoke($controller, '103222', new PortalCredential(['access_token' => 'token']), 'A');
+
+        $this->assertSame('P103222', $code);
+    }
+}
+
+class FakeCiencuadrasLegacyClient extends CiencuadrasClient
+{
+    public function __construct() {}
+
+    public function consultProperties(array $propertyCodes, PortalCredential $cred): array
+    {
+        return collect($propertyCodes)
+            ->mapWithKeys(fn (string $code) => [$code => [
+                'ok' => true,
+                'data' => str_contains($code, '-P')
+                    ? [
+                        'message' => [[
+                            'propertyCode' => $code,
+                            'active' => 'Activo',
+                            'status' => '0',
+                        ]],
+                    ]
+                    : [
+                        'message' => 'El inmueble que esta buscando no existe',
+                        'status' => 'error',
+                        'statusCode' => 126,
+                    ],
+            ]])
+            ->all();
+    }
+
+    public function consultProperty(string $propertyCode, PortalCredential $cred): array
+    {
+        return $this->consultProperties([$propertyCode], $cred)[$propertyCode];
     }
 }

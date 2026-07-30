@@ -44,24 +44,21 @@ class CiencuadrasActiveProperties
     public function inspectSourceCodes(array|Collection $sourceCodes, PortalCredential $credential): Collection
     {
         $prefix = (string) config('portals.ciencuadras.property_code_prefix', '22130-');
-        $portalCodes = collect($sourceCodes)
+        $sourceCodes = collect($sourceCodes)
             ->map(fn ($code) => $this->sourceCode((string) $code))
             ->filter()
+            ->unique();
+        $portalCodes = $sourceCodes
+            ->flatMap(fn (string $code) => [$prefix.$code, $prefix.'P'.$code])
             ->unique()
-            ->mapWithKeys(fn (string $code) => [$code => $prefix.$code]);
-        $results = $this->client->consultProperties($portalCodes->values()->all(), $credential);
+            ->values();
+        $results = $this->client->consultProperties($portalCodes->all(), $credential);
 
-        return $portalCodes->map(function (string $portalCode) use ($results) {
-            $result = $results[$portalCode] ?? null;
-            if (! ($result['ok'] ?? false)) {
-                return [
-                    'state' => 'unavailable',
-                    'property' => null,
-                    'response' => $result['data'] ?? null,
-                ];
-            }
-
-            return $this->stateFromResponse($result['data'] ?? []);
+        return $sourceCodes->mapWithKeys(function (string $sourceCode) use ($prefix, $results) {
+            return [$sourceCode => $this->bestStateFromResults([
+                $prefix.$sourceCode,
+                $prefix.'P'.$sourceCode,
+            ], $results)];
         });
     }
 
@@ -138,6 +135,41 @@ class CiencuadrasActiveProperties
             'state' => $this->isActiveInventoryProperty($property) ? 'active' : 'inactive',
             'property' => $property,
             'response' => $response,
+        ];
+    }
+
+    protected function bestStateFromResults(array $portalCodes, array $results): array
+    {
+        $fallback = null;
+
+        foreach ($portalCodes as $portalCode) {
+            $result = $results[$portalCode] ?? null;
+            if (! ($result['ok'] ?? false)) {
+                $fallback ??= [
+                    'state' => 'unavailable',
+                    'portal_code' => $portalCode,
+                    'property' => null,
+                    'response' => $result['data'] ?? null,
+                ];
+
+                continue;
+            }
+
+            $state = $this->stateFromResponse($result['data'] ?? []);
+            $state['portal_code'] = $portalCode;
+
+            if ($state['state'] === 'active') {
+                return $state;
+            }
+
+            $fallback ??= $state;
+        }
+
+        return $fallback ?? [
+            'state' => 'missing',
+            'portal_code' => null,
+            'property' => null,
+            'response' => null,
         ];
     }
 

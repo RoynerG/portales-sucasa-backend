@@ -33,6 +33,7 @@ return [
         'property_code_prefix' => env('CIENCUADRAS_PROPERTY_CODE_PREFIX', '22130-'),
         'default_city_id' => env('CIENCUADRAS_DEFAULT_CITY_ID'),
         'default_locality_id' => env('CIENCUADRAS_DEFAULT_LOCALITY_ID'),
+        'show_address' => env('CIENCUADRAS_SHOW_ADDRESS', false),
         'contact_name' => env('CIENCUADRAS_CONTACT_NAME', 'Su Casa Inmobiliaria'),
         'contact_phone' => env('CIENCUADRAS_CONTACT_PHONE'),
         'contact_email' => env('CIENCUADRAS_CONTACT_EMAIL'),

@@ -339,11 +339,41 @@ class CiencuadrasController extends Controller
         }
         $reportedCode = $this->extractPropertyCode($statusResult['data'] ?? null);
         $consultCode = $reportedCode
-            ? $this->mapper->lookupCode($reportedCode)
+            ? $this->consultCodeFromPayload($reportedCode)
             : $this->consultCodeFromPayload((string) $mapped['payload']['propertyCode']);
         $consult = $this->consultPropertyWithFallback($consultCode, $cred, $status);
         $consultCode = $consult['code'];
         $propertyResult = $consult['result'];
+        $previousAttempt = null;
+
+        if ($action !== 'publish'
+            && ! $this->responseHasActive($propertyResult['data'] ?? null)
+            && $this->responseHasNotFound($statusResult['data'] ?? null)) {
+            $alternatePayloadCode = $this->alternatePayloadCode((string) $mapped['payload']['propertyCode']);
+
+            if ($alternatePayloadCode) {
+                $previousAttempt = [
+                    'propertyCode' => $mapped['payload']['propertyCode'],
+                    'request' => $result['data'] ?? null,
+                    'status_check' => $statusResult['data'] ?? null,
+                    'property_check' => $propertyResult['data'] ?? null,
+                ];
+
+                $mapped['payload']['propertyCode'] = $alternatePayloadCode;
+                $result = $this->cc->updateProperty($mapped['payload'], $cred);
+                $idRequest = $result['ok'] ? $this->cc->extractIdRequest($result['data'] ?? []) : null;
+                $statusResult = $idRequest
+                    ? $this->cc->consultStatus(['idRequest' => $idRequest], $cred)
+                    : null;
+                $reportedCode = $this->extractPropertyCode($statusResult['data'] ?? null);
+                $consultCode = $reportedCode
+                    ? $this->consultCodeFromPayload($reportedCode)
+                    : $this->consultCodeFromPayload((string) $mapped['payload']['propertyCode']);
+                $consult = $this->consultPropertyWithFallback($consultCode, $cred, $status);
+                $consultCode = $consult['code'];
+                $propertyResult = $consult['result'];
+            }
+        }
 
         $response = [
             'target_action' => $action,
@@ -352,6 +382,9 @@ class CiencuadrasController extends Controller
             'status_check' => $statusResult['data'] ?? null,
             'property_check' => $propertyResult['data'] ?? null,
         ];
+        if ($previousAttempt) {
+            $response['previous_attempt'] = $previousAttempt;
+        }
         $syncStatus = $this->syncState($result, $statusResult, $status, $propertyResult);
         $webUrl = $this->propertyWebUrl($code);
         $this->saveStatus(
@@ -562,7 +595,7 @@ class CiencuadrasController extends Controller
     {
         $existingCode = $this->extractPropertyCode($status?->last_response ?? null) ?: $default;
 
-        return $this->mapper->lookupCode($existingCode);
+        return $this->consultCodeFromPayload($existingCode);
     }
 
     protected function payloadCodeForExistingListing(int $propertyId, string $default, string $targetStatus = 'A', ?PortalCredential $credential = null): string
@@ -625,7 +658,31 @@ class CiencuadrasController extends Controller
 
     protected function consultCodeFromPayload(string $payloadCode): string
     {
-        return $this->mapper->lookupCode($payloadCode);
+        $prefix = (string) config('portals.ciencuadras.property_code_prefix', '22130-');
+        $code = trim($payloadCode);
+
+        if ($prefix !== '' && str_starts_with(strtolower($code), strtolower($prefix))) {
+            return $code;
+        }
+
+        if (preg_match('/^P\d+$/i', $code) === 1) {
+            return $prefix.$code;
+        }
+
+        return $this->mapper->lookupCode($code);
+    }
+
+    protected function alternatePayloadCode(string $payloadCode): ?string
+    {
+        $code = $this->payloadCodeFromConsultCode($payloadCode);
+
+        if (preg_match('/^P\d+$/i', $code) === 1) {
+            return $this->mapper->portalPropertyCode($code);
+        }
+
+        $clean = $this->mapper->portalPropertyCode($code);
+
+        return $clean === '' ? null : 'P'.$clean;
     }
 
     protected function consultPropertyWithFallback(string $code, PortalCredential $cred, ?string $targetStatus = null): array

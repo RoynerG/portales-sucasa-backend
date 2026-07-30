@@ -338,6 +338,36 @@ class CiencuadrasController extends Controller
         $property = $mapped['property'];
         $payloadPropertyCode = (string) $mapped['payload']['propertyCode'];
         if ($action === 'update') {
+            $currentPortalStatus = PropertySyncStatus::where([
+                'property_id' => $property->id,
+                'integration_id' => $this->integration()->id,
+                'environment' => config('portals.ciencuadras.environment'),
+            ])->first();
+            $currentResponse = $currentPortalStatus?->last_response ?? [];
+
+            if ($this->responseHasUnconfirmedPublish($currentResponse)) {
+                $currentPortalStatus->fill([
+                    'sync_status' => 'pending',
+                    'last_error' => null,
+                    'last_attempt_at' => now(),
+                ])->save();
+
+                return response()->json(['Datos' => [
+                    'ok' => true,
+                    'environment' => config('portals.ciencuadras.environment'),
+                    'external_code' => $currentPortalStatus->external_id,
+                    'action' => 'publish',
+                    'requested_action' => $requestedAction,
+                    'target_status' => 'A',
+                    'sync_status' => 'pending',
+                    'id_request' => $this->cc->extractIdRequest($currentResponse),
+                    'public_url' => null,
+                    'web_url' => $this->propertyWebUrl($code),
+                    'response' => $currentResponse,
+                    'message' => 'La publicación ya fue aceptada y sigue pendiente de confirmación en Ciencuadras.',
+                ]], 202);
+            }
+
             $inspection = $this->activeProperties
                 ->inspectSourceCodes([$code], $cred)
                 ->get($this->mapper->portalPropertyCode($code));
@@ -870,6 +900,16 @@ class CiencuadrasController extends Controller
         return str_contains($json, 'no existe')
             || str_contains($json, 'not found')
             || str_contains($json, 'no tiene inmuebles');
+    }
+
+    protected function responseHasUnconfirmedPublish(array $response): bool
+    {
+        $statusCheck = $this->responseValue($response, 'status_check');
+        $propertyCheck = $this->responseValue($response, 'property_check');
+
+        return $this->responseValue($response, 'target_action') === 'publish'
+            && $this->responseHasNotFound($propertyCheck)
+            && ($this->responseHasSuccess($statusCheck) || $this->responseIsPending($statusCheck));
     }
 
     protected function responseHasInactive($data): bool

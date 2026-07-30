@@ -153,4 +153,30 @@ class CiencuadrasStateResolutionTest extends TestCase
 
         $this->assertSame('22130-103104', $result['code']);
     }
+
+    public function test_successful_publish_with_missing_property_is_still_unconfirmed(): void
+    {
+        $controller = new CiencuadrasController(
+            Mockery::mock(CiencuadrasClient::class),
+            Mockery::mock(CiencuadrasPropertyMapper::class),
+            Mockery::mock(CiencuadrasActiveProperties::class),
+        );
+        $method = new ReflectionMethod(CiencuadrasController::class, 'responseHasUnconfirmedPublish');
+
+        $this->assertTrue($method->invoke($controller, [
+            'target_action' => 'publish',
+            'status_check' => [[
+                'message' => [
+                    'status' => 'success',
+                    'statusCode' => 100,
+                    'propertyDetailUrl' => 'https://ciencuadras.com/inmueble/example-123',
+                ],
+            ]],
+            'property_check' => [
+                'message' => 'El inmueble que esta buscando no existe',
+                'status' => 'error',
+                'statusCode' => 126,
+            ],
+        ]));
+    }
 }

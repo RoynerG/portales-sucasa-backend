@@ -40,6 +40,11 @@ class VerifyPendingCiencuadras extends Command
                                     ->orWhere('last_error', 'like', '%update-property%')
                                     ->orWhereNotNull('external_url');
                             });
+                    })
+                    ->orWhere(function ($query) {
+                        $query->where('sync_status', 'synced')
+                            ->where('last_response', 'like', '%target_action%publish%')
+                            ->where('last_response', 'like', '%statusCode%126%');
                     });
             })
             ->orderByRaw('COALESCE(last_attempt_at, created_at) ASC')

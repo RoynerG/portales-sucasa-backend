@@ -53,13 +53,39 @@ class CiencuadrasActiveProperties
             ->unique()
             ->values();
         $results = $this->client->consultProperties($portalCodes->all(), $credential);
+        $reportedActiveCodes = $this->reportedActiveCodes($credential);
 
-        return $sourceCodes->mapWithKeys(function (string $sourceCode) use ($prefix, $results) {
-            return [$sourceCode => $this->bestStateFromResults([
+        return $sourceCodes->mapWithKeys(function (string $sourceCode) use ($prefix, $results, $reportedActiveCodes) {
+            $candidates = [
                 $prefix.$sourceCode,
                 $prefix.'P'.$sourceCode,
-            ], $results)];
+            ];
+            $reportedCode = $this->firstReportedCode($candidates, $reportedActiveCodes);
+
+            if ($reportedCode) {
+                return [$sourceCode => [
+                    'state' => 'active',
+                    'portal_code' => $reportedCode,
+                    'property' => ['propertyCode' => $reportedCode],
+                    'response' => ['source' => 'consult-all-properties'],
+                ]];
+            }
+
+            return [$sourceCode => $this->bestStateFromResults($candidates, $results)];
         });
+    }
+
+    public function reportedActiveCodeForSource(
+        string $sourceCode,
+        PortalCredential $credential
+    ): ?string {
+        $prefix = (string) config('portals.ciencuadras.property_code_prefix', '22130-');
+        $sourceCode = $this->sourceCode($sourceCode);
+
+        return $this->firstReportedCode([
+            $prefix.$sourceCode,
+            $prefix.'P'.$sourceCode,
+        ], $this->reportedActiveCodes($credential));
     }
 
     protected function inventory(bool $fresh = false): ?Collection
@@ -171,6 +197,41 @@ class CiencuadrasActiveProperties
             'property' => null,
             'response' => null,
         ];
+    }
+
+    protected function reportedActiveCodes(PortalCredential $credential): ?Collection
+    {
+        $result = $this->client->consultAllProperties($credential);
+        if (! ($result['ok'] ?? false)) {
+            return null;
+        }
+
+        return collect($result['data']['message'] ?? [])
+            ->filter(fn ($property) => is_array($property) && ! empty($property['propertyCode']))
+            ->pluck('propertyCode')
+            ->map(fn ($code) => trim((string) $code))
+            ->filter()
+            ->unique()
+            ->values();
+    }
+
+    protected function firstReportedCode(array $candidates, ?Collection $reportedCodes): ?string
+    {
+        if ($reportedCodes === null) {
+            return null;
+        }
+
+        $byLowercase = $reportedCodes->mapWithKeys(
+            fn (string $code) => [strtolower($code) => $code]
+        );
+
+        foreach ($candidates as $candidate) {
+            if ($reported = $byLowercase->get(strtolower($candidate))) {
+                return $reported;
+            }
+        }
+
+        return null;
     }
 
     public function sourceCode(string $portalCode): string

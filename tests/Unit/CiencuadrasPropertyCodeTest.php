@@ -126,6 +126,28 @@ class CiencuadrasPropertyCodeTest extends TestCase
         $this->assertSame('P103222', $code);
     }
 
+    public function test_update_uses_active_inventory_when_direct_consult_returns_deleted_history(): void
+    {
+        config(['portals.ciencuadras.property_code_prefix' => '22130-']);
+
+        $client = new FakeCiencuadrasAmbiguousHistoryClient;
+        $controller = new CiencuadrasController(
+            $client,
+            app(CiencuadrasPropertyMapper::class),
+            new CiencuadrasActiveProperties($client)
+        );
+        $method = new ReflectionMethod(CiencuadrasController::class, 'activePayloadCodeForExistingListing');
+
+        $code = $method->invoke(
+            $controller,
+            '103104',
+            new PortalCredential(['access_token' => 'token']),
+            'A'
+        );
+
+        $this->assertSame('P103104', $code);
+    }
+
     public function test_consult_code_from_payload_keeps_legacy_p_codes(): void
     {
         config(['portals.ciencuadras.property_code_prefix' => '22130-']);
@@ -172,5 +194,66 @@ class FakeCiencuadrasLegacyClient extends CiencuadrasClient
     public function consultProperty(string $propertyCode, PortalCredential $cred): array
     {
         return $this->consultProperties([$propertyCode], $cred)[$propertyCode];
+    }
+
+    public function consultAllProperties(PortalCredential $cred): array
+    {
+        return [
+            'ok' => true,
+            'data' => [
+                'message' => [
+                    ['propertyCode' => '22130-P103222'],
+                ],
+            ],
+        ];
+    }
+}
+
+class FakeCiencuadrasAmbiguousHistoryClient extends CiencuadrasClient
+{
+    public function __construct() {}
+
+    public function consultProperty(string $propertyCode, PortalCredential $cred): array
+    {
+        return str_contains($propertyCode, '-P')
+            ? [
+                'ok' => true,
+                'data' => [
+                    'message' => [[
+                        'propertyCode' => $propertyCode,
+                        'active' => 'Eliminado',
+                        'status' => '8',
+                    ]],
+                    'status' => 'success',
+                    'statusCode' => 100,
+                ],
+            ]
+            : [
+                'ok' => true,
+                'data' => [
+                    'message' => 'El inmueble que esta buscando no existe',
+                    'status' => 'error',
+                    'statusCode' => 126,
+                ],
+            ];
+    }
+
+    public function consultProperties(array $propertyCodes, PortalCredential $cred): array
+    {
+        return collect($propertyCodes)
+            ->mapWithKeys(fn (string $code) => [$code => $this->consultProperty($code, $cred)])
+            ->all();
+    }
+
+    public function consultAllProperties(PortalCredential $cred): array
+    {
+        return [
+            'ok' => true,
+            'data' => [
+                'message' => [
+                    ['propertyCode' => '22130-P103104'],
+                ],
+            ],
+        ];
     }
 }

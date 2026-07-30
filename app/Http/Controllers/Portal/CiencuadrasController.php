@@ -656,6 +656,14 @@ class CiencuadrasController extends Controller
     protected function activePayloadCodeForExistingListing(string $code, PortalCredential $credential, string $targetStatus): ?string
     {
         $isInactiveTarget = in_array($targetStatus, ['I', 'D'], true);
+        $reportedActiveCode = $this->activeProperties->reportedActiveCodeForSource(
+            $code,
+            $credential
+        );
+
+        if ($reportedActiveCode) {
+            return $this->payloadCodeFromConsultCode($reportedActiveCode);
+        }
 
         foreach ($this->consultCodeCandidates($code) as $candidate) {
             $result = $this->cc->consultProperty($candidate, $credential);

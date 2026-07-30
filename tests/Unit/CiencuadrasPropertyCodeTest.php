@@ -125,6 +125,22 @@ class CiencuadrasPropertyCodeTest extends TestCase
 
         $this->assertSame('P103222', $code);
     }
+
+    public function test_consult_code_from_payload_keeps_legacy_p_codes(): void
+    {
+        config(['portals.ciencuadras.property_code_prefix' => '22130-']);
+
+        $controller = new CiencuadrasController(
+            new FakeCiencuadrasLegacyClient,
+            app(CiencuadrasPropertyMapper::class),
+            new CiencuadrasActiveProperties(new FakeCiencuadrasLegacyClient)
+        );
+        $method = new ReflectionMethod(CiencuadrasController::class, 'consultCodeFromPayload');
+
+        $this->assertSame('22130-P103222', $method->invoke($controller, 'P103222'));
+        $this->assertSame('22130-P103222', $method->invoke($controller, '22130-P103222'));
+        $this->assertSame('22130-103222', $method->invoke($controller, '103222'));
+    }
 }
 
 class FakeCiencuadrasLegacyClient extends CiencuadrasClient

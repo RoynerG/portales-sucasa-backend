@@ -77,8 +77,33 @@ class CiencuadrasController extends Controller
         $consult = $this->consultPropertyWithFallback($consultCode, $cred, $targetStatus);
         $consultCode = $consult['code'];
         $propertyResult = $consult['result'];
+        $previousAttempt = null;
+
+        if (in_array($targetAction, ['update', 'pause', 'delete'], true)
+            && $this->responseHasNotFound($statusResult['data'] ?? null)) {
+            $retry = $this->retryExistingActionWithAlternateCode(
+                $code,
+                (string) $targetAction,
+                (string) ($targetStatus ?: 'A'),
+                $this->payloadCodeFromConsultCode($consultCode),
+                $cred,
+                $statusResult,
+                $propertyResult
+            );
+
+            if ($retry) {
+                $previousAttempt = $retry['previous_attempt'];
+                $idRequest = $retry['id_request'];
+                $statusResult = $retry['status_result'];
+                $consultCode = $retry['consult_code'];
+                $propertyResult = $retry['property_result'];
+            }
+        }
 
         $response = $this->verificationResponse($idRequest, $targetAction, $targetStatus, $statusResult['data'] ?? null, $propertyResult['data'] ?? null);
+        if ($previousAttempt) {
+            $response['previous_attempt'] = $previousAttempt;
+        }
         $syncStatus = $this->verifiedSyncState($statusResult, $propertyResult, $status?->sync_status, $targetStatus);
         $webUrl = $this->propertyWebUrl($code);
 
@@ -670,6 +695,54 @@ class CiencuadrasController extends Controller
         }
 
         return $this->mapper->lookupCode($code);
+    }
+
+    protected function retryExistingActionWithAlternateCode(
+        string $code,
+        string $action,
+        string $targetStatus,
+        string $currentPayloadCode,
+        PortalCredential $credential,
+        ?array $statusResult,
+        array $propertyResult
+    ): ?array {
+        $alternatePayloadCode = $this->alternatePayloadCode($currentPayloadCode);
+        if (! $alternatePayloadCode) {
+            return null;
+        }
+
+        $mapped = $this->mapper->fromCode($code, $targetStatus);
+        $mapped['payload']['propertyCode'] = $alternatePayloadCode;
+
+        if ($mapped['errors']) {
+            return null;
+        }
+
+        $result = $this->cc->updateProperty($mapped['payload'], $credential);
+        $idRequest = $result['ok'] ? $this->cc->extractIdRequest($result['data'] ?? []) : null;
+        $retryStatusResult = $idRequest
+            ? $this->cc->consultStatus(['idRequest' => $idRequest], $credential)
+            : null;
+        $reportedCode = $this->extractPropertyCode($retryStatusResult['data'] ?? null);
+        $consultCode = $reportedCode
+            ? $this->consultCodeFromPayload($reportedCode)
+            : $this->consultCodeFromPayload((string) $mapped['payload']['propertyCode']);
+        $consult = $this->consultPropertyWithFallback($consultCode, $credential, $targetStatus);
+
+        return [
+            'id_request' => $idRequest,
+            'status_result' => $retryStatusResult,
+            'consult_code' => $consult['code'],
+            'property_result' => $consult['result'],
+            'previous_attempt' => [
+                'propertyCode' => $currentPayloadCode,
+                'status_check' => $statusResult['data'] ?? null,
+                'property_check' => $propertyResult['data'] ?? null,
+                'retry_propertyCode' => $alternatePayloadCode,
+                'retry_action' => $action,
+                'retry_request' => $result['data'] ?? null,
+            ],
+        ];
     }
 
     protected function alternatePayloadCode(string $payloadCode): ?string

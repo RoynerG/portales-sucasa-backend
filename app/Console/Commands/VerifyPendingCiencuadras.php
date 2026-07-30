@@ -27,7 +27,21 @@ class VerifyPendingCiencuadras extends Command
             ->with('property')
             ->where('integration_id', $integration->id)
             ->where('environment', config('portals.ciencuadras.environment'))
-            ->whereIn('sync_status', ['pending', 'syncing'])
+            ->where(function ($query) {
+                $query->whereIn('sync_status', ['pending', 'syncing', 'not_synced'])
+                    ->orWhere(function ($query) {
+                        $query->where('sync_status', 'error')
+                            ->where(function ($query) {
+                                $query->where('last_error', 'like', '%timeout%')
+                                    ->orWhere('last_error', 'like', '%idRequest%')
+                                    ->orWhere('last_error', 'like', '%Petición enviada%')
+                                    ->orWhere('last_error', 'like', '%Pending to be processed%')
+                                    ->orWhere('last_error', 'like', '%consult-status%')
+                                    ->orWhere('last_error', 'like', '%update-property%')
+                                    ->orWhereNotNull('external_url');
+                            });
+                    });
+            })
             ->orderByRaw('COALESCE(last_attempt_at, created_at) ASC')
             ->limit(max(1, (int) $this->option('limit')))
             ->get();

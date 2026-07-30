@@ -337,9 +337,7 @@ class CiencuadrasController extends Controller
         $consultCode = $reportedCode
             ? $this->mapper->lookupCode($reportedCode)
             : $this->consultCodeFromPayload((string) $mapped['payload']['propertyCode']);
-        $propertyResult = $result['ok']
-            ? $this->cc->consultProperty($consultCode, $cred)
-            : null;
+        $propertyResult = $this->cc->consultProperty($consultCode, $cred);
 
         $response = [
             'target_action' => $action,
@@ -441,21 +439,21 @@ class CiencuadrasController extends Controller
 
     protected function syncState(array $result, ?array $statusResult, string $targetStatus, ?array $propertyResult = null): string
     {
-        if (! ($result['ok'] ?? false)) {
-            return 'error';
-        }
-
-        $data = $statusResult['data'] ?? $result['data'] ?? [];
-        $json = strtolower(json_encode($data));
-
         if ($targetStatus === 'I' || $targetStatus === 'D') {
-            if ($this->responseIsPending($statusResult['data'] ?? null)) {
-                return 'pending';
-            }
-
             if ($this->responseHasInactive($propertyResult['data'] ?? null)
                 || $this->responseHasNotFound($propertyResult['data'] ?? null)) {
                 return 'paused';
+            }
+
+            if (! ($result['ok'] ?? false)) {
+                return 'error';
+            }
+
+            $data = $statusResult['data'] ?? $result['data'] ?? [];
+            $json = strtolower(json_encode($data));
+
+            if ($this->responseIsPending($statusResult['data'] ?? null)) {
+                return 'pending';
             }
 
             if (str_contains($json, 'error') || str_contains($json, 'fall')) {
@@ -465,12 +463,19 @@ class CiencuadrasController extends Controller
             return 'pending';
         }
 
-        if (str_contains($json, 'error') || str_contains($json, 'fall')) {
+        if ($this->responseHasActive($propertyResult['data'] ?? null)) {
+            return 'synced';
+        }
+
+        if (! ($result['ok'] ?? false)) {
             return 'error';
         }
 
-        if ($this->responseHasActive($propertyResult['data'] ?? null)) {
-            return 'synced';
+        $data = $statusResult['data'] ?? $result['data'] ?? [];
+        $json = strtolower(json_encode($data));
+
+        if (str_contains($json, 'error') || str_contains($json, 'fall')) {
+            return 'error';
         }
 
         if ($this->responseIsPending($statusResult['data'] ?? null)
@@ -492,17 +497,17 @@ class CiencuadrasController extends Controller
         $propertyData = $propertyResult['data'] ?? null;
 
         if ($targetStatus === 'I' || $targetStatus === 'D' || $currentStatus === 'paused') {
+            if ($this->responseHasInactive($propertyData)
+                || $this->responseHasNotFound($propertyData)) {
+                return 'paused';
+            }
+
             if ($this->responseHasError($statusData)) {
                 return 'error';
             }
 
             if ($this->responseIsPending($statusData)) {
                 return 'pending';
-            }
-
-            if ($this->responseHasInactive($propertyData)
-                || $this->responseHasNotFound($propertyData)) {
-                return 'paused';
             }
 
             if (! ($propertyResult['ok'] ?? false)) {
@@ -512,12 +517,12 @@ class CiencuadrasController extends Controller
             return 'pending';
         }
 
-        if ($this->responseHasError($statusData)) {
-            return 'error';
-        }
-
         if ($this->responseHasActive($propertyData)) {
             return 'synced';
+        }
+
+        if ($this->responseHasError($statusData)) {
+            return 'error';
         }
 
         if ($this->responseIsPending($statusData)

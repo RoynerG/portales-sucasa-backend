@@ -312,11 +312,16 @@ class AutoSyncCiencuadras extends Command
 
     protected function syncState(array $result, ?array $statusResult, string $targetStatus, ?array $propertyResult = null): string
     {
-        if (! ($result['ok'] ?? false)) {
-            return 'error';
-        }
-
         if ($targetStatus === 'I') {
+            if ($this->responseHasInactive($propertyResult['data'] ?? null)
+                || $this->responseHasNotFound($propertyResult['data'] ?? null)) {
+                return 'paused';
+            }
+
+            if (! ($result['ok'] ?? false)) {
+                return 'error';
+            }
+
             $json = strtolower(json_encode($statusResult['data'] ?? $result['data'] ?? []));
             if (str_contains($json, 'error') || str_contains($json, 'fall')) {
                 return 'error';
@@ -326,21 +331,20 @@ class AutoSyncCiencuadras extends Command
                 return 'pending';
             }
 
-            if ($this->responseHasInactive($propertyResult['data'] ?? null)
-                || $this->responseHasNotFound($propertyResult['data'] ?? null)) {
-                return 'paused';
-            }
-
             return 'pending';
+        }
+
+        if ($this->responseHasActive($propertyResult['data'] ?? null)) {
+            return 'synced';
+        }
+
+        if (! ($result['ok'] ?? false)) {
+            return 'error';
         }
 
         $json = strtolower(json_encode($statusResult['data'] ?? $result['data'] ?? []));
         if (str_contains($json, 'error') || str_contains($json, 'fall')) {
             return 'error';
-        }
-
-        if ($this->responseHasActive($propertyResult['data'] ?? null)) {
-            return 'synced';
         }
 
         if ($this->responseIsPending($statusResult['data'] ?? null)

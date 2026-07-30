@@ -126,16 +126,16 @@ class VerifyPendingCiencuadras extends Command
         $propertyData = $propertyResult['data'] ?? null;
 
         if ($targetStatus === 'I' || $targetStatus === 'D' || $currentStatus === 'paused') {
+            if ($this->responseHasInactive($propertyData) || $this->responseHasNotFound($propertyData)) {
+                return 'paused';
+            }
+
             if ($this->responseHasError($statusData)) {
                 return 'error';
             }
 
             if ($this->responseIsPending($statusData)) {
                 return 'pending';
-            }
-
-            if ($this->responseHasInactive($propertyData) || $this->responseHasNotFound($propertyData)) {
-                return 'paused';
             }
 
             if (! ($propertyResult['ok'] ?? false)) {
@@ -145,12 +145,12 @@ class VerifyPendingCiencuadras extends Command
             return 'pending';
         }
 
-        if ($this->responseHasError($statusData)) {
-            return 'error';
-        }
-
         if ($this->responseHasActive($propertyData)) {
             return 'synced';
+        }
+
+        if ($this->responseHasError($statusData)) {
+            return 'error';
         }
 
         if ($this->responseIsPending($statusData)) {

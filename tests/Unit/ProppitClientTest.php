@@ -62,6 +62,27 @@ class ProppitClientTest extends TestCase
         $this->assertSame('request-123', $result['data']['body']['requestId']);
     }
 
+    public function test_create_publisher_posts_the_expected_payload(): void
+    {
+        $client = $this->clientWith([
+            new Response(201, [], json_encode([
+                'id' => 'sucasa',
+                'name' => 'Su Casa Inmobiliaria',
+                'publishingEnabled' => false,
+            ])),
+        ]);
+
+        $result = $client->createPublisher([
+            'id' => 'sucasa',
+            'name' => 'Su Casa Inmobiliaria',
+        ], 'token');
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame(201, $result['status']);
+        $this->assertSame('sucasa', $result['data']['id']);
+        $this->assertFalse($result['data']['publishingEnabled']);
+    }
+
     private function clientWith(array $responses): ProppitClient
     {
         $handler = new MockHandler($responses);

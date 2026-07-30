@@ -24,12 +24,36 @@ class ProppitController extends Controller
     {
         $credential = $this->credential($request, true);
         $publisherId = trim((string) config('portals.proppit.publisher_external_id'));
+        if ($publisherId === '') {
+            return response()->json(['Datos' => [
+                'ok' => false,
+                'publisher_external_id' => $publisherId,
+                'error' => [
+                    'code' => 'missing_publisher_external_id',
+                    'message' => 'Falta PROPPIT_PUBLISHER_EXTERNAL_ID.',
+                    'resolution' => 'Configura el Publisher ID entregado o solicitado a Proppit y vuelve a probar la API.',
+                ],
+            ]], 422);
+        }
+
+        $publisher = $this->ensurePublisher($publisherId, $credential->access_token);
+        if (! ($publisher['ok'] ?? false)) {
+            return response()->json(['Datos' => [
+                'ok' => false,
+                'api_url' => config('portals.proppit.api_url'),
+                'country' => config('portals.proppit.country'),
+                'publisher_external_id' => $publisherId,
+                'publisher' => $publisher,
+                'error' => $publisher['error'] ?? null,
+            ]], 422);
+        }
 
         return response()->json(['Datos' => [
             'ok' => true,
             'api_url' => config('portals.proppit.api_url'),
             'country' => config('portals.proppit.country'),
             'publisher_external_id' => $publisherId,
+            'publisher' => $publisher,
             'expires_at' => $credential->access_token_expires_at?->toIso8601String(),
         ]]);
     }
@@ -107,9 +131,18 @@ class ProppitController extends Controller
         }
 
         $token = $this->credential($request)->access_token;
+        $publisherId = (string) config('portals.proppit.publisher_external_id');
         $result = $action === 'publish'
             ? $this->proppit->createAd($mapped['payload'], $token)
             : $this->proppit->updateAd($referenceId, $mapped['payload'], $token);
+
+        if ($action === 'publish' && $this->isPublisherNotFound($result) && $publisherId !== '') {
+            $publisher = $this->ensurePublisher($publisherId, $token);
+            if (($publisher['ok'] ?? false) && ($publisher['created'] ?? false)) {
+                $result = $this->proppit->createAd($mapped['payload'], $token);
+            }
+        }
+
         $result = $this->decorateResult($result);
         $status = $result['ok'] ? 'synced' : 'error';
 
@@ -171,6 +204,56 @@ class ProppitController extends Controller
                 'api_url' => config('portals.proppit.api_url'),
             ],
         ]);
+    }
+
+    protected function ensurePublisher(string $publisherId, string $token): array
+    {
+        $result = $this->proppit->getPublisher($publisherId, $token);
+        if ($result['ok'] ?? false) {
+            return [
+                'ok' => true,
+                'created' => false,
+                'publishing_enabled' => (bool) data_get($result, 'data.publishingEnabled', false),
+                'data' => $result['data'] ?? null,
+            ];
+        }
+
+        if (! $this->isPublisherNotFound($result)) {
+            return [
+                'ok' => false,
+                'created' => false,
+                'error' => $this->decorateResult($result)['portal_error'] ?? null,
+                'response' => $result['data'] ?? $result,
+            ];
+        }
+
+        $created = $this->proppit->createPublisher($this->publisherPayload($publisherId), $token);
+        if ($created['ok'] ?? false) {
+            return [
+                'ok' => true,
+                'created' => true,
+                'publishing_enabled' => (bool) data_get($created, 'data.publishingEnabled', false),
+                'data' => $created['data'] ?? null,
+                'message' => 'Publisher creado en Proppit. Queda pendiente de aprobación por soporte antes de salir visible en portales.',
+            ];
+        }
+
+        return [
+            'ok' => false,
+            'created' => false,
+            'error' => $this->decorateResult($created)['portal_error'] ?? null,
+            'response' => $created['data'] ?? $created,
+        ];
+    }
+
+    protected function publisherPayload(string $publisherId): array
+    {
+        return array_filter([
+            'id' => $publisherId,
+            'name' => config('portals.proppit.default_contact_name'),
+            'email' => config('portals.proppit.default_contact_email'),
+            'phone' => config('portals.proppit.default_contact_phone'),
+        ], fn ($value) => $value !== null && $value !== '');
     }
 
     protected function saveStatus(Property $property, string $syncStatus, string $externalId, array $response, ?string $error): void
@@ -241,9 +324,9 @@ class ProppitController extends Controller
         $requestId = is_array($body) ? (string) ($body['requestId'] ?? '') : '';
         $normalized = strtolower($portalMessage);
 
-        if (str_contains($normalized, 'publisher not found')) {
+        if ($this->isPublisherNotFound($result)) {
             $message = 'Publisher no encontrado en Proppit.';
-            $resolution = 'El PROPPIT_PUBLISHER_EXTERNAL_ID configurado no existe o no pertenece al Client ID actual. Corrige ese identificador y vuelve a probar la API.';
+            $resolution = 'El backend intentará crear el publisher cuando pruebes la API. Si ya fue creado, espera aprobación de soporte Proppit o reporta el Request ID.';
             $code = 'publisher_not_found';
         } elseif (str_contains($normalized, 'invalid credentials')) {
             $message = 'Client ID o Client Secret inválidos.';
@@ -265,6 +348,16 @@ class ProppitController extends Controller
         ];
 
         return $result;
+    }
+
+    protected function isPublisherNotFound(array $result): bool
+    {
+        $body = data_get($result, 'data.body');
+        $portalMessage = is_array($body)
+            ? (string) ($body['error'] ?? '')
+            : (string) data_get($result, 'data.error', '');
+
+        return str_contains(strtolower($portalMessage), 'publisher not found');
     }
 
     protected function integration(): Integration

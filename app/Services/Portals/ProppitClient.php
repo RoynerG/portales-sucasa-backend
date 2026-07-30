@@ -70,6 +70,14 @@ class ProppitClient
         ]);
     }
 
+    public function createPublisher(array $payload, string $token): array
+    {
+        return $this->request('POST', $this->countryPath('/publishers'), [
+            'json' => $payload,
+            'token' => $token,
+        ]);
+    }
+
     protected function countryPath(string $suffix): string
     {
         return '/proppit/' . rawurlencode(strtoupper((string) config('portals.proppit.country', 'CO'))) . $suffix;

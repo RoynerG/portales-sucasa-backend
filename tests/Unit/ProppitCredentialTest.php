@@ -78,6 +78,35 @@ class ProppitCredentialTest extends TestCase
             DB::table('portal_credentials')->value('access_token')
         );
     }
+
+    public function test_login_creates_the_publisher_when_proppit_reports_it_missing(): void
+    {
+        Integration::create(['name' => 'Proppit', 'slug' => 'proppit']);
+        config()->set('portals.proppit.default_contact_name', 'Su Casa Inmobiliaria');
+        config()->set('portals.proppit.default_contact_email', 'contacto@sucasa.com');
+        config()->set('portals.proppit.default_contact_phone', '3001234567');
+
+        $request = Request::create('/api/portals/proppit/login', 'POST');
+        $request->setUserResolver(fn () => (object) ['id' => 1]);
+        $client = new FakeProppitClient;
+        $controller = new TestableProppitController(
+            $client,
+            new ProppitPropertyMapper
+        );
+
+        $response = $controller->login($request);
+        $data = $response->getData(true)['Datos'];
+
+        $this->assertTrue($data['ok']);
+        $this->assertTrue($data['publisher']['created']);
+        $this->assertFalse($data['publisher']['publishing_enabled']);
+        $this->assertSame([
+            'id' => 'sucasa',
+            'name' => 'Su Casa Inmobiliaria',
+            'email' => 'contacto@sucasa.com',
+            'phone' => '3001234567',
+        ], $client->createdPublisherPayload);
+    }
 }
 
 class TestableProppitController extends ProppitController
@@ -90,6 +119,8 @@ class TestableProppitController extends ProppitController
 
 class FakeProppitClient extends ProppitClient
 {
+    public ?array $createdPublisherPayload = null;
+
     public function __construct() {}
 
     public function token(?array $credentials = null): array
@@ -99,6 +130,38 @@ class FakeProppitClient extends ProppitClient
             'data' => [
                 'token' => 'fresh-encrypted-token',
                 'expiration' => now()->addHour()->timestamp,
+            ],
+        ];
+    }
+
+    public function getPublisher(string $externalId, string $token): array
+    {
+        return [
+            'ok' => false,
+            'data' => [
+                'status' => 404,
+                'body' => [
+                    'status' => 404,
+                    'requestId' => 'request-123',
+                    'error' => 'Publisher not found',
+                ],
+            ],
+        ];
+    }
+
+    public function createPublisher(array $payload, string $token): array
+    {
+        $this->createdPublisherPayload = $payload;
+
+        return [
+            'ok' => true,
+            'status' => 201,
+            'data' => [
+                'id' => $payload['id'],
+                'name' => $payload['name'] ?? null,
+                'email' => $payload['email'] ?? null,
+                'phone' => $payload['phone'] ?? null,
+                'publishingEnabled' => false,
             ],
         ];
     }

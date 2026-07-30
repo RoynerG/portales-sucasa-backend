@@ -192,7 +192,9 @@ Proppit ya no usa feed XML: publica, actualiza y despublica con la API real-time
 Proppit denomina las credenciales `Client ID` y `Client Secret`, pero su endpoint
 `POST /token` exige enviarlas como `user` y `password`. El backend hace esa
 adaptación. `PROPPIT_PUBLISHER_EXTERNAL_ID` es un identificador independiente:
-debe existir para esas credenciales y estar aprobado por Proppit.
+el backend lo consulta y, si Proppit responde `Publisher not found`, lo crea con
+los datos `PROPPIT_DEFAULT_CONTACT_*`. Luego Proppit debe aprobarlo para que
+`publishingEnabled` quede en `true` y los anuncios sean visibles en sus portales.
 
 El `referenceId` enviado a Proppit siempre es el código original del inmueble,
 sin agregar prefijos. Por ejemplo, el inmueble `53824` se envía como `53824`.

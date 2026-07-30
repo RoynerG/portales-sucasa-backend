@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\PortalResetAccess;
 use App\Services\WordPressFuncionarioAuthenticator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -12,8 +13,11 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    public function login(Request $request, WordPressFuncionarioAuthenticator $funcionarioAuth): JsonResponse
-    {
+    public function login(
+        Request $request,
+        WordPressFuncionarioAuthenticator $funcionarioAuth,
+        PortalResetAccess $portalResetAccess
+    ): JsonResponse {
         $request->validate([
             'password' => ['required', 'string'],
         ]);
@@ -61,15 +65,7 @@ class AuthController extends Controller
         return response()->json([
             'Datos' => [
                 'token' => $token,
-                'user' => [
-                    'id' => $user->id,
-                    'email' => $user->email,
-                    'name' => $user->name,
-                    'avatar' => $user->avatar_path,
-                    'detail' => $user->bio,
-                    'role' => $user->role,
-                    'legacy_employee_id' => $user->legacy_employee_id,
-                ],
+                'user' => $this->userPayload($user, $portalResetAccess),
             ],
         ]);
     }
@@ -77,22 +73,34 @@ class AuthController extends Controller
     public function logout(Request $request): JsonResponse
     {
         $request->user()->currentAccessToken()->delete();
+
         return response()->json(['Datos' => 'OK']);
     }
 
-    public function me(Request $request): JsonResponse
+    public function me(Request $request, PortalResetAccess $portalResetAccess): JsonResponse
     {
         $user = $request->user();
+
         return response()->json([
-            'Datos' => [
-                'id' => $user->id,
-                'email' => $user->email,
-                'name' => $user->name,
-                'avatar' => $user->avatar_path,
-                'detail' => $user->bio,
-                'role' => $user->role,
-                'legacy_employee_id' => $user->legacy_employee_id,
-            ],
+            'Datos' => $this->userPayload($user, $portalResetAccess),
         ]);
+    }
+
+    private function userPayload(User $user, PortalResetAccess $portalResetAccess): array
+    {
+        $cargo = $portalResetAccess->resolveCargo($user);
+
+        return [
+            'id' => $user->id,
+            'email' => $user->email,
+            'name' => $user->name,
+            'avatar' => $user->avatar_path,
+            'detail' => $user->bio,
+            'role' => $user->role,
+            'legacy_employee_id' => $user->legacy_employee_id,
+            'cargo_id' => $cargo['id'],
+            'cargo' => $cargo['label'],
+            'permissions' => $portalResetAccess->canReset($user, $cargo) ? ['portal_reset'] : [],
+        ];
     }
 }

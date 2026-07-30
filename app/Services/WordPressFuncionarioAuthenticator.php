@@ -81,7 +81,7 @@ class WordPressFuncionarioAuthenticator
             ->first();
 
         if (! $user) {
-            $user = User::where('email', $email)->first() ?: new User();
+            $user = User::where('email', $email)->first() ?: new User;
         }
 
         $user->fill([
@@ -99,6 +99,9 @@ class WordPressFuncionarioAuthenticator
                 'legacy_employee_id' => $employeeId,
                 'legacy_user' => $funcionario->user_others_apss ?? $login,
                 'rol' => $funcionario->rol ?? null,
+                'id_cargo' => isset($funcionario->id_cargo) && trim((string) $funcionario->id_cargo) !== ''
+                    ? (int) $funcionario->id_cargo
+                    : null,
                 'gestion' => $funcionario->gestion ?? null,
                 'id_sucursal' => $funcionario->id_sucursal ?? null,
             ],

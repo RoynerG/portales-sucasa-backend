@@ -14,6 +14,7 @@ use App\Http\Controllers\Portal\MercadoLibreController;
 use App\Http\Controllers\Portal\PortalAutomationController;
 use App\Http\Controllers\Portal\PortalBulkController;
 use App\Http\Controllers\Portal\PortalErrorController;
+use App\Http\Controllers\Portal\PortalResetController;
 use App\Http\Controllers\Portal\ProppitController;
 use Illuminate\Support\Facades\Route;
 
@@ -61,6 +62,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Portales
     Route::prefix('portals')->group(function () {
+        Route::middleware('portal-reset')->prefix('settings')->group(function () {
+            Route::get('/reset-preview', [PortalResetController::class, 'preview']);
+            Route::post('/reset', [PortalResetController::class, 'reset']);
+        });
+
         Route::get('/mercadolibre/status', [MercadoLibreController::class, 'status']);
         Route::get('/mercadolibre/authorize', [MercadoLibreController::class, 'redirect']);
         Route::post('/mercadolibre/disconnect', [MercadoLibreController::class, 'disconnect']);

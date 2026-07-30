@@ -120,7 +120,7 @@ class ReconcileCiencuadrasActiveProperties extends Command
                     ],
                 ],
                 'last_error' => match (true) {
-                    $nextStatus === 'not_synced' => 'Ciencuadras no reporta este inmueble como activo. Se enviará nuevamente si sigue publicado en el sistema.',
+                    $nextStatus === 'not_synced' => 'Ciencuadras no reporta este inmueble como activo. Requiere revisión manual; no se enviará otra publicación automáticamente.',
                     default => null,
                 },
                 'last_synced_at' => $nextStatus === 'synced' ? now() : $status->last_synced_at,
@@ -130,7 +130,7 @@ class ReconcileCiencuadrasActiveProperties extends Command
 
         $this->info(
             "Publicados en portal: {$portalCodes->count()} | Confirmados: {$summary['active']} | "
-            . "En espera: {$summary['pending']} | Por reenviar: {$summary['not_synced']} | "
+            . "En espera: {$summary['pending']} | Revisión manual: {$summary['not_synced']} | "
             . "Despublicados: {$summary['paused']} | Errores: {$summary['error']} | "
             . "Sin cambios: {$summary['unchanged']}"
         );

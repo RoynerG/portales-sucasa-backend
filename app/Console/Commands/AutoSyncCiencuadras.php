@@ -115,18 +115,14 @@ class AutoSyncCiencuadras extends Command
             [$action, $status] = $decision;
 
             if ($action === 'publish' && ! $dryRun) {
-                $legacyState = $activeProperties->inspectLegacyCode(
-                    $activeProperties->legacyCodeForSource($code),
-                    $credential,
-                    true
-                );
-                if ($legacyState === null) {
-                    $this->warn("{$code}: omitido; no fue posible verificar la publicación anterior.");
+                $portalState = $activeProperties->inspectSourceCodes([$code], $credential)->get($code);
+                if (($portalState['state'] ?? 'unavailable') === 'unavailable') {
+                    $this->warn("{$code}: omitido; no fue posible verificar el inventario de Ciencuadras.");
                     $summary['skipped']++;
                     continue;
                 }
-                if ($legacyState['state'] === 'active') {
-                    $this->warn("{$code}: bloqueado; todavía existe una publicación anterior en Ciencuadras.");
+                if (($portalState['state'] ?? null) === 'active') {
+                    $this->warn("{$code}: bloqueado; ya existe una publicación activa en Ciencuadras.");
                     $summary['skipped']++;
                     continue;
                 }
@@ -223,7 +219,7 @@ class AutoSyncCiencuadras extends Command
         }
 
         if ($isPublic) {
-            if (! $sync || in_array($current, [null, 'not_synced'], true)) {
+            if (! $sync) {
                 return ['publish', 'A'];
             }
 
@@ -231,8 +227,8 @@ class AutoSyncCiencuadras extends Command
                 return ['update', 'A'];
             }
 
-            if ($current === 'error' && ($retryErrors || ((int) $sync->attempts) < 3)) {
-                return ['publish', 'A'];
+            if (in_array($current, ['error', 'not_synced'], true)) {
+                return $retryErrors ? ['update', 'A'] : null;
             }
 
             $modifiedAt = $this->wpModifiedAt($row);
@@ -328,6 +324,10 @@ class AutoSyncCiencuadras extends Command
                 return 'error';
             }
 
+            if ($this->responseHasSuccess($statusResult['data'] ?? null)) {
+                return 'paused';
+            }
+
             $json = strtolower(json_encode($statusResult['data'] ?? $result['data'] ?? []));
             if (str_contains($json, 'error') || str_contains($json, 'fall')) {
                 return 'error';
@@ -348,13 +348,16 @@ class AutoSyncCiencuadras extends Command
             return 'error';
         }
 
+        if ($this->responseHasSuccess($statusResult['data'] ?? null)) {
+            return 'synced';
+        }
+
         $json = strtolower(json_encode($statusResult['data'] ?? $result['data'] ?? []));
         if (str_contains($json, 'error') || str_contains($json, 'fall')) {
             return 'error';
         }
 
         if ($this->responseIsPending($statusResult['data'] ?? null)
-            || $this->responseHasSuccess($statusResult['data'] ?? null)
             || $this->responseHasNotFound($propertyResult['data'] ?? null)) {
             return 'pending';
         }

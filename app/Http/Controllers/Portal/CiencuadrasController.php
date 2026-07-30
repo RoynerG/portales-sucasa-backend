@@ -77,33 +77,8 @@ class CiencuadrasController extends Controller
         $consult = $this->consultPropertyWithFallback($consultCode, $cred, $targetStatus);
         $consultCode = $consult['code'];
         $propertyResult = $consult['result'];
-        $previousAttempt = null;
-
-        if (in_array($targetAction, ['update', 'pause', 'delete'], true)
-            && $this->responseHasNotFound($statusResult['data'] ?? null)) {
-            $retry = $this->retryExistingActionWithAlternateCode(
-                $code,
-                (string) $targetAction,
-                (string) ($targetStatus ?: 'A'),
-                $this->payloadCodeFromConsultCode($consultCode),
-                $cred,
-                $statusResult,
-                $propertyResult
-            );
-
-            if ($retry) {
-                $previousAttempt = $retry['previous_attempt'];
-                $idRequest = $retry['id_request'];
-                $statusResult = $retry['status_result'];
-                $consultCode = $retry['consult_code'];
-                $propertyResult = $retry['property_result'];
-            }
-        }
 
         $response = $this->verificationResponse($idRequest, $targetAction, $targetStatus, $statusResult['data'] ?? null, $propertyResult['data'] ?? null);
-        if ($previousAttempt) {
-            $response['previous_attempt'] = $previousAttempt;
-        }
         $syncStatus = $this->verifiedSyncState($statusResult, $propertyResult, $status?->sync_status, $targetStatus);
         $webUrl = $this->propertyWebUrl($code);
 
@@ -113,7 +88,8 @@ class CiencuadrasController extends Controller
                 $syncStatus,
                 $externalCode,
                 $response,
-                $syncStatus === 'error' ? $this->errorMessage($response) : null
+                $syncStatus === 'error' ? $this->errorMessage($response) : null,
+                incrementAttempt: false
             );
         }
 
@@ -154,13 +130,9 @@ class CiencuadrasController extends Controller
         $action = $data['action'];
         $targetStatus = $action === 'pause' ? 'I' : 'A';
         $credential = $this->credential($request);
-        $inspectedCodes = in_array($action, ['update', 'pause'], true)
+        $inspectedCodes = in_array($action, ['publish', 'update', 'pause'], true)
             ? $this->activeProperties->inspectSourceCodes($data['codes'], $credential)
             : collect();
-        $knownSourceCodes = $action === 'publish'
-            ? $this->activeProperties->sourceCodes()?->flip()
-            : collect();
-        abort_if($knownSourceCodes === null, 503, 'No fue posible verificar el inventario de Ciencuadras.');
 
         $payloads = [];
         $properties = [];
@@ -170,27 +142,41 @@ class CiencuadrasController extends Controller
         foreach ($data['codes'] as $value) {
             $code = trim((string) $value);
 
-            if ($action === 'publish' && $knownSourceCodes->has($code)) {
-                $skipped[] = [
-                    'code' => $code,
-                    'message' => 'El código ya existe en Ciencuadras; usa Actualizar.',
-                ];
-
-                continue;
-            }
-
             if ($action === 'publish') {
-                $previousState = $this->activeProperties->inspectLegacyCode(
-                    $this->activeProperties->legacyCodeForSource($code),
-                    $credential,
-                    true
-                );
-                if ($previousState === null || $previousState['state'] === 'active') {
+                $portalState = $inspectedCodes->get($code);
+                if (($portalState['state'] ?? 'unavailable') === 'unavailable') {
                     $rejected[] = [
                         'code' => $code,
-                        'message' => $previousState === null
-                            ? 'No fue posible verificar la publicación anterior en Ciencuadras.'
-                            : 'Todavía existe una publicación anterior. Retírala antes de publicar el código limpio.',
+                        'message' => 'No fue posible verificar el inventario de Ciencuadras.',
+                    ];
+
+                    continue;
+                }
+
+                if (($portalState['state'] ?? null) === 'active') {
+                    $skipped[] = [
+                        'code' => $code,
+                        'message' => 'El inmueble ya está activo en Ciencuadras; usa Actualizar.',
+                    ];
+
+                    continue;
+                }
+
+                $localProperty = Property::where('code', $code)->first();
+                $localStatus = $localProperty ? PropertySyncStatus::where([
+                    'property_id' => $localProperty->id,
+                    'integration_id' => $this->integration()->id,
+                    'environment' => config('portals.ciencuadras.environment'),
+                ])->first() : null;
+                $localResponse = $localStatus?->last_response ?? [];
+
+                if ($localStatus
+                    && in_array($localStatus->sync_status, ['pending', 'syncing', 'synced'], true)
+                    && $this->responseValue($localResponse, 'target_action') === 'publish'
+                    && $this->cc->extractIdRequest($localResponse)) {
+                    $skipped[] = [
+                        'code' => $code,
+                        'message' => 'La publicación ya fue enviada; se conserva la solicitud original.',
                     ];
 
                     continue;
@@ -318,77 +304,55 @@ class CiencuadrasController extends Controller
 
     protected function send(Request $request, string $code, string $action, string $status): JsonResponse
     {
-        $requestedAction = $action;
+        $cred = $this->credential($request);
 
         if ($action === 'publish') {
-            $legacyState = $this->activeProperties->inspectLegacyCode(
-                $this->activeProperties->legacyCodeForSource($code),
-                fresh: true
-            );
-            abort_if($legacyState === null, 503, 'No fue posible verificar el código anterior en Ciencuadras.');
-            abort_if(
-                $legacyState['state'] === 'active',
-                409,
-                'Este inmueble todavía tiene un código P activo en Ciencuadras. Elimínalo y verifica la baja antes de publicar el código limpio.'
-            );
-        }
-
-        $cred = $this->credential($request);
-        $mapped = $this->mapper->fromCode($code, $status);
-        $property = $mapped['property'];
-        $payloadPropertyCode = (string) $mapped['payload']['propertyCode'];
-        if ($action === 'update') {
-            $currentPortalStatus = PropertySyncStatus::where([
-                'property_id' => $property->id,
+            $existingProperty = Property::where('code', $code)->first();
+            $existingStatus = $existingProperty ? PropertySyncStatus::where([
+                'property_id' => $existingProperty->id,
                 'integration_id' => $this->integration()->id,
                 'environment' => config('portals.ciencuadras.environment'),
-            ])->first();
-            $currentResponse = $currentPortalStatus?->last_response ?? [];
+            ])->first() : null;
+            $existingResponse = $existingStatus?->last_response ?? [];
+            $existingIdRequest = $this->cc->extractIdRequest($existingResponse);
 
-            if ($this->responseHasUnconfirmedPublish($currentResponse)) {
-                $currentPortalStatus->fill([
-                    'sync_status' => 'pending',
-                    'last_error' => null,
-                    'last_attempt_at' => now(),
-                ])->save();
-
+            if ($existingIdRequest
+                && in_array($existingStatus->sync_status, ['pending', 'syncing', 'synced'], true)
+                && $this->responseValue($existingResponse, 'target_action') === 'publish'
+                && ! $this->responseHasError($this->responseValue($existingResponse, 'status_check'))) {
                 return response()->json(['Datos' => [
                     'ok' => true,
                     'environment' => config('portals.ciencuadras.environment'),
-                    'external_code' => $currentPortalStatus->external_id,
+                    'external_code' => $existingStatus->external_id,
                     'action' => 'publish',
-                    'requested_action' => $requestedAction,
                     'target_status' => 'A',
-                    'sync_status' => 'pending',
-                    'id_request' => $this->cc->extractIdRequest($currentResponse),
-                    'public_url' => null,
+                    'sync_status' => $existingStatus->sync_status,
+                    'id_request' => $existingIdRequest,
+                    'public_url' => $existingStatus->external_url,
                     'web_url' => $this->propertyWebUrl($code),
-                    'response' => $currentResponse,
-                    'message' => 'La publicación ya fue aceptada y sigue pendiente de confirmación en Ciencuadras.',
-                ]], 202);
+                    'response' => $existingResponse,
+                    'message' => 'La publicación ya fue enviada. Se conserva el idRequest original sin reenviarla.',
+                    'reused_request' => true,
+                ]]);
             }
 
-            $inspection = $this->activeProperties
-                ->inspectSourceCodes([$code], $cred)
-                ->get($this->mapper->portalPropertyCode($code));
-            $inspectionState = $inspection['state'] ?? 'unavailable';
-
+            $portalState = $this->activeProperties->inspectSourceCodes([$code], $cred)->get($code);
             abort_if(
-                $inspectionState === 'unavailable',
+                ($portalState['state'] ?? 'unavailable') === 'unavailable',
                 503,
-                'No fue posible comprobar el inmueble en Ciencuadras. Intenta nuevamente.'
+                'No fue posible verificar el inventario de Ciencuadras.'
             );
+            abort_if(
+                ($portalState['state'] ?? null) === 'active',
+                409,
+                'Este inmueble ya está activo en Ciencuadras. Usa Actualizar; no se enviará otra publicación.'
+            );
+        }
 
-            if ($inspectionState === 'active') {
-                $mapped['payload']['propertyCode'] = $this->payloadCodeFromConsultCode(
-                    (string) $inspection['portal_code']
-                );
-            } else {
-                // Ciencuadras cannot update missing or deleted listings. Recreate it with the clean code.
-                $action = 'publish';
-                $mapped['payload']['propertyCode'] = $this->mapper->portalPropertyCode($payloadPropertyCode);
-            }
-        } elseif ($action !== 'publish') {
+        $mapped = $this->mapper->fromCode($code, $status);
+        $property = $mapped['property'];
+        $payloadPropertyCode = (string) $mapped['payload']['propertyCode'];
+        if ($action !== 'publish') {
             $mapped['payload']['propertyCode'] = $this->payloadCodeForExistingListing(
                 $property->id,
                 $payloadPropertyCode,
@@ -427,48 +391,14 @@ class CiencuadrasController extends Controller
         $consult = $this->consultPropertyWithFallback($consultCode, $cred, $status);
         $consultCode = $consult['code'];
         $propertyResult = $consult['result'];
-        $previousAttempt = null;
-
-        if ($action !== 'publish'
-            && ! $this->responseHasActive($propertyResult['data'] ?? null)
-            && $this->responseHasNotFound($statusResult['data'] ?? null)) {
-            $alternatePayloadCode = $this->alternatePayloadCode((string) $mapped['payload']['propertyCode']);
-
-            if ($alternatePayloadCode) {
-                $previousAttempt = [
-                    'propertyCode' => $mapped['payload']['propertyCode'],
-                    'request' => $result['data'] ?? null,
-                    'status_check' => $statusResult['data'] ?? null,
-                    'property_check' => $propertyResult['data'] ?? null,
-                ];
-
-                $mapped['payload']['propertyCode'] = $alternatePayloadCode;
-                $result = $this->cc->updateProperty($mapped['payload'], $cred);
-                $idRequest = $result['ok'] ? $this->cc->extractIdRequest($result['data'] ?? []) : null;
-                $statusResult = $idRequest
-                    ? $this->cc->consultStatus(['idRequest' => $idRequest], $cred)
-                    : null;
-                $reportedCode = $this->extractPropertyCode($statusResult['data'] ?? null);
-                $consultCode = $reportedCode
-                    ? $this->consultCodeFromPayload($reportedCode)
-                    : $this->consultCodeFromPayload((string) $mapped['payload']['propertyCode']);
-                $consult = $this->consultPropertyWithFallback($consultCode, $cred, $status);
-                $consultCode = $consult['code'];
-                $propertyResult = $consult['result'];
-            }
-        }
 
         $response = [
-            'requested_action' => $requestedAction,
             'target_action' => $action,
             'target_status' => $status,
             'request' => $result['data'],
             'status_check' => $statusResult['data'] ?? null,
             'property_check' => $propertyResult['data'] ?? null,
         ];
-        if ($previousAttempt) {
-            $response['previous_attempt'] = $previousAttempt;
-        }
         $syncStatus = $this->syncState($result, $statusResult, $status, $propertyResult);
         $webUrl = $this->propertyWebUrl($code);
         $this->saveStatus(
@@ -539,7 +469,15 @@ class CiencuadrasController extends Controller
         return Integration::where('slug', 'ciencuadras')->firstOrFail();
     }
 
-    protected function saveStatus(int $propertyId, string $syncStatus, string $externalId, array $response, ?string $error, ?string $fallbackUrl = null): void
+    protected function saveStatus(
+        int $propertyId,
+        string $syncStatus,
+        string $externalId,
+        array $response,
+        ?string $error,
+        ?string $fallbackUrl = null,
+        bool $incrementAttempt = true
+    ): void
     {
         $status = PropertySyncStatus::firstOrNew([
             'property_id' => $propertyId,
@@ -555,7 +493,7 @@ class CiencuadrasController extends Controller
             'last_error' => $error,
             'last_attempt_at' => now(),
             'last_synced_at' => in_array($syncStatus, ['synced', 'paused'], true) ? now() : $status->last_synced_at,
-            'attempts' => ((int) $status->attempts) + 1,
+            'attempts' => ((int) $status->attempts) + ($incrementAttempt ? 1 : 0),
         ]);
         $status->save();
     }
@@ -574,6 +512,10 @@ class CiencuadrasController extends Controller
 
             $data = $statusResult['data'] ?? $result['data'] ?? [];
             $json = strtolower(json_encode($data));
+
+            if ($this->responseHasSuccess($statusResult['data'] ?? null)) {
+                return 'paused';
+            }
 
             if ($this->responseIsPending($statusResult['data'] ?? null)) {
                 return 'pending';
@@ -597,12 +539,15 @@ class CiencuadrasController extends Controller
         $data = $statusResult['data'] ?? $result['data'] ?? [];
         $json = strtolower(json_encode($data));
 
+        if ($this->responseHasSuccess($statusResult['data'] ?? null)) {
+            return 'synced';
+        }
+
         if (str_contains($json, 'error') || str_contains($json, 'fall')) {
             return 'error';
         }
 
         if ($this->responseIsPending($statusResult['data'] ?? null)
-            || $this->responseHasSuccess($statusResult['data'] ?? null)
             || $this->responseHasNotFound($propertyResult['data'] ?? null)) {
             return 'pending';
         }
@@ -625,6 +570,10 @@ class CiencuadrasController extends Controller
                 return 'paused';
             }
 
+            if ($this->responseHasSuccess($statusData)) {
+                return 'paused';
+            }
+
             if ($this->responseHasError($statusData)) {
                 return 'error';
             }
@@ -644,12 +593,15 @@ class CiencuadrasController extends Controller
             return 'synced';
         }
 
+        if ($this->responseHasSuccess($statusData)) {
+            return 'synced';
+        }
+
         if ($this->responseHasError($statusData)) {
             return 'error';
         }
 
         if ($this->responseIsPending($statusData)
-            || $this->responseHasSuccess($statusData)
             || $this->responseHasNotFound($propertyData)) {
             return 'pending';
         }
@@ -746,67 +698,6 @@ class CiencuadrasController extends Controller
         return $this->mapper->lookupCode($code);
     }
 
-    protected function retryExistingActionWithAlternateCode(
-        string $code,
-        string $action,
-        string $targetStatus,
-        string $currentPayloadCode,
-        PortalCredential $credential,
-        ?array $statusResult,
-        array $propertyResult
-    ): ?array {
-        $alternatePayloadCode = $this->alternatePayloadCode($currentPayloadCode);
-        if (! $alternatePayloadCode) {
-            return null;
-        }
-
-        $mapped = $this->mapper->fromCode($code, $targetStatus);
-        $mapped['payload']['propertyCode'] = $alternatePayloadCode;
-
-        if ($mapped['errors']) {
-            return null;
-        }
-
-        $result = $this->cc->updateProperty($mapped['payload'], $credential);
-        $idRequest = $result['ok'] ? $this->cc->extractIdRequest($result['data'] ?? []) : null;
-        $retryStatusResult = $idRequest
-            ? $this->cc->consultStatus(['idRequest' => $idRequest], $credential)
-            : null;
-        $reportedCode = $this->extractPropertyCode($retryStatusResult['data'] ?? null);
-        $consultCode = $reportedCode
-            ? $this->consultCodeFromPayload($reportedCode)
-            : $this->consultCodeFromPayload((string) $mapped['payload']['propertyCode']);
-        $consult = $this->consultPropertyWithFallback($consultCode, $credential, $targetStatus);
-
-        return [
-            'id_request' => $idRequest,
-            'status_result' => $retryStatusResult,
-            'consult_code' => $consult['code'],
-            'property_result' => $consult['result'],
-            'previous_attempt' => [
-                'propertyCode' => $currentPayloadCode,
-                'status_check' => $statusResult['data'] ?? null,
-                'property_check' => $propertyResult['data'] ?? null,
-                'retry_propertyCode' => $alternatePayloadCode,
-                'retry_action' => $action,
-                'retry_request' => $result['data'] ?? null,
-            ],
-        ];
-    }
-
-    protected function alternatePayloadCode(string $payloadCode): ?string
-    {
-        $code = $this->payloadCodeFromConsultCode($payloadCode);
-
-        if (preg_match('/^P\d+$/i', $code) === 1) {
-            return $this->mapper->portalPropertyCode($code);
-        }
-
-        $clean = $this->mapper->portalPropertyCode($code);
-
-        return $clean === '' ? null : 'P'.$clean;
-    }
-
     protected function consultPropertyWithFallback(string $code, PortalCredential $cred, ?string $targetStatus = null): array
     {
         $first = null;
@@ -900,16 +791,6 @@ class CiencuadrasController extends Controller
         return str_contains($json, 'no existe')
             || str_contains($json, 'not found')
             || str_contains($json, 'no tiene inmuebles');
-    }
-
-    protected function responseHasUnconfirmedPublish(array $response): bool
-    {
-        $statusCheck = $this->responseValue($response, 'status_check');
-        $propertyCheck = $this->responseValue($response, 'property_check');
-
-        return $this->responseValue($response, 'target_action') === 'publish'
-            && $this->responseHasNotFound($propertyCheck)
-            && ($this->responseHasSuccess($statusCheck) || $this->responseIsPending($statusCheck));
     }
 
     protected function responseHasInactive($data): bool

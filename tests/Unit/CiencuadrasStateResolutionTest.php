@@ -5,6 +5,7 @@ namespace Tests\Unit;
 use App\Console\Commands\AutoSyncCiencuadras;
 use App\Console\Commands\VerifyPendingCiencuadras;
 use App\Http\Controllers\Portal\CiencuadrasController;
+use App\Models\PropertySyncStatus;
 use App\Models\PortalCredential;
 use App\Services\Portals\CiencuadrasActiveProperties;
 use App\Services\Portals\CiencuadrasClient;
@@ -42,8 +43,7 @@ class CiencuadrasStateResolutionTest extends TestCase
             ['ok' => true, 'data' => ['status' => 'error', 'message' => 'Idle timeout reached']],
             ['ok' => true, 'data' => ['message' => ['active' => 'Activo', 'status' => '0']]],
             'pending',
-            'A',
-            1
+            'A'
         ));
     }
 
@@ -93,7 +93,7 @@ class CiencuadrasStateResolutionTest extends TestCase
         $this->assertTrue($result['result']['ok']);
     }
 
-    public function test_public_status_url_stays_pending_until_clean_property_is_active(): void
+    public function test_processed_request_is_synced_while_public_page_is_indexed(): void
     {
         $method = new ReflectionMethod(CiencuadrasController::class, 'verifiedSyncState');
         $controller = new CiencuadrasController(
@@ -102,7 +102,7 @@ class CiencuadrasStateResolutionTest extends TestCase
             Mockery::mock(CiencuadrasActiveProperties::class),
         );
 
-        $this->assertSame('pending', $method->invoke(
+        $this->assertSame('synced', $method->invoke(
             $controller,
             ['ok' => true, 'data' => [[
                 'propertyCode' => '22130-103104',
@@ -154,29 +154,36 @@ class CiencuadrasStateResolutionTest extends TestCase
         $this->assertSame('22130-103104', $result['code']);
     }
 
-    public function test_successful_publish_with_missing_property_is_still_unconfirmed(): void
+    public function test_auto_sync_only_publishes_a_property_without_portal_history(): void
     {
-        $controller = new CiencuadrasController(
-            Mockery::mock(CiencuadrasClient::class),
-            Mockery::mock(CiencuadrasPropertyMapper::class),
-            Mockery::mock(CiencuadrasActiveProperties::class),
-        );
-        $method = new ReflectionMethod(CiencuadrasController::class, 'responseHasUnconfirmedPublish');
+        $method = new ReflectionMethod(AutoSyncCiencuadras::class, 'decision');
+        $row = (object) ['estado' => 'Publicado', 'fecha_actualizacion' => null, 'cct_modified' => null];
+        $command = new AutoSyncCiencuadras();
 
-        $this->assertTrue($method->invoke($controller, [
-            'target_action' => 'publish',
-            'status_check' => [[
-                'message' => [
-                    'status' => 'success',
-                    'statusCode' => 100,
-                    'propertyDetailUrl' => 'https://ciencuadras.com/inmueble/example-123',
-                ],
-            ]],
-            'property_check' => [
-                'message' => 'El inmueble que esta buscando no existe',
-                'status' => 'error',
-                'statusCode' => 126,
-            ],
-        ]));
+        $this->assertSame(['publish', 'A'], $method->invoke($command, $row, null, false));
+        $this->assertNull($method->invoke(
+            $command,
+            $row,
+            new PropertySyncStatus(['sync_status' => 'pending', 'attempts' => 1]),
+            false
+        ));
+        $this->assertNull($method->invoke(
+            $command,
+            $row,
+            new PropertySyncStatus(['sync_status' => 'error', 'attempts' => 1]),
+            false
+        ));
+        $this->assertNull($method->invoke(
+            $command,
+            $row,
+            new PropertySyncStatus(['sync_status' => 'not_synced', 'attempts' => 30]),
+            false
+        ));
+        $this->assertSame(['update', 'A'], $method->invoke(
+            $command,
+            $row,
+            new PropertySyncStatus(['sync_status' => 'error', 'attempts' => 1]),
+            true
+        ));
     }
 }

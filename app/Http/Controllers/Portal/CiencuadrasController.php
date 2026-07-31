@@ -73,8 +73,13 @@ class CiencuadrasController extends Controller
         $statusResult = $idRequest
             ? $this->cc->consultStatus(['idRequest' => $idRequest], $cred)
             : null;
-        $consultCode = $this->consultCodeForStatus($status, $externalCode);
-        $consult = $this->consultPropertyWithFallback($consultCode, $cred, $targetStatus);
+        $portalState = $this->activeProperties->inspectSourceCodes([$code], $cred)->get($code);
+        $consult = $this->activeInventoryResult($portalState, $targetStatus)
+            ?? $this->consultPropertyWithFallback(
+                $this->consultCodeForStatus($status, $externalCode),
+                $cred,
+                $targetStatus
+            );
         $consultCode = $consult['code'];
         $propertyResult = $consult['result'];
 
@@ -86,9 +91,10 @@ class CiencuadrasController extends Controller
             $this->saveStatus(
                 $property->id,
                 $syncStatus,
-                $externalCode,
+                $consultCode,
                 $response,
                 $syncStatus === 'error' ? $this->errorMessage($response) : null,
+                fallbackUrl: $status?->external_url,
                 incrementAttempt: false
             );
         }
@@ -305,35 +311,42 @@ class CiencuadrasController extends Controller
     protected function send(Request $request, string $code, string $action, string $status): JsonResponse
     {
         $cred = $this->credential($request);
+        $existingProperty = Property::where('code', $code)->first();
+        $existingStatus = $existingProperty ? PropertySyncStatus::where([
+            'property_id' => $existingProperty->id,
+            'integration_id' => $this->integration()->id,
+            'environment' => config('portals.ciencuadras.environment'),
+        ])->first() : null;
+        $existingResponse = $existingStatus?->last_response ?? [];
+        $existingIdRequest = $this->cc->extractIdRequest($existingResponse);
+        $existingAction = $this->responseValue($existingResponse, 'target_action');
+
+        if ($existingIdRequest
+            && in_array($existingStatus->sync_status, ['pending', 'syncing'], true)
+            && $existingAction === $action) {
+            return $this->reusedPendingResponse(
+                $code,
+                $action,
+                $status,
+                $existingStatus,
+                $existingResponse,
+                $existingIdRequest
+            );
+        }
 
         if ($action === 'publish') {
-            $existingProperty = Property::where('code', $code)->first();
-            $existingStatus = $existingProperty ? PropertySyncStatus::where([
-                'property_id' => $existingProperty->id,
-                'integration_id' => $this->integration()->id,
-                'environment' => config('portals.ciencuadras.environment'),
-            ])->first() : null;
-            $existingResponse = $existingStatus?->last_response ?? [];
-            $existingIdRequest = $this->cc->extractIdRequest($existingResponse);
-
             if ($existingIdRequest
-                && in_array($existingStatus->sync_status, ['pending', 'syncing', 'synced'], true)
-                && $this->responseValue($existingResponse, 'target_action') === 'publish'
+                && $existingStatus?->sync_status === 'synced'
+                && $existingAction === 'publish'
                 && ! $this->responseHasError($this->responseValue($existingResponse, 'status_check'))) {
-                return response()->json(['Datos' => [
-                    'ok' => true,
-                    'environment' => config('portals.ciencuadras.environment'),
-                    'external_code' => $existingStatus->external_id,
-                    'action' => 'publish',
-                    'target_status' => 'A',
-                    'sync_status' => $existingStatus->sync_status,
-                    'id_request' => $existingIdRequest,
-                    'public_url' => $existingStatus->external_url,
-                    'web_url' => $this->propertyWebUrl($code),
-                    'response' => $existingResponse,
-                    'message' => 'La publicación ya fue enviada. Se conserva el idRequest original sin reenviarla.',
-                    'reused_request' => true,
-                ]]);
+                return $this->reusedPendingResponse(
+                    $code,
+                    $action,
+                    $status,
+                    $existingStatus,
+                    $existingResponse,
+                    $existingIdRequest
+                );
             }
 
             $portalState = $this->activeProperties->inspectSourceCodes([$code], $cred)->get($code);
@@ -425,6 +438,57 @@ class CiencuadrasController extends Controller
             'web_url' => $webUrl,
             'response' => $response,
         ]]);
+    }
+
+    protected function reusedPendingResponse(
+        string $code,
+        string $action,
+        string $targetStatus,
+        PropertySyncStatus $status,
+        array $response,
+        string $idRequest
+    ): JsonResponse {
+        return response()->json(['Datos' => [
+            'ok' => true,
+            'environment' => config('portals.ciencuadras.environment'),
+            'external_code' => $status->external_id,
+            'action' => $action,
+            'target_status' => $targetStatus,
+            'sync_status' => $status->sync_status,
+            'id_request' => $idRequest,
+            'public_url' => $status->external_url,
+            'web_url' => $this->propertyWebUrl($code),
+            'response' => $response,
+            'message' => 'Esta acción ya fue enviada. Se conserva la solicitud original sin crear otro intento.',
+            'reused_request' => true,
+        ]]);
+    }
+
+    protected function activeInventoryResult(?array $portalState, ?string $targetStatus): ?array
+    {
+        if (in_array($targetStatus, ['I', 'D'], true)
+            || ($portalState['state'] ?? null) !== 'active'
+            || empty($portalState['portal_code'])) {
+            return null;
+        }
+
+        $portalCode = (string) $portalState['portal_code'];
+
+        return [
+            'code' => $portalCode,
+            'result' => [
+                'ok' => true,
+                'data' => [
+                    'message' => [[
+                        'propertyCode' => $portalCode,
+                        'active' => 'Activo',
+                        'status' => '0',
+                    ]],
+                    'status' => 'success',
+                    'statusCode' => 100,
+                ],
+            ],
+        ];
     }
 
     protected function credential(Request $request, bool $forceRefresh = false): PortalCredential

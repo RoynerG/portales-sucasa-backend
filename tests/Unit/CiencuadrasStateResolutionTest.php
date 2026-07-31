@@ -47,6 +47,20 @@ class CiencuadrasStateResolutionTest extends TestCase
         ));
     }
 
+    public function test_pending_verification_normalizes_active_inventory_listing(): void
+    {
+        $method = new ReflectionMethod(VerifyPendingCiencuadras::class, 'activeInventoryResult');
+
+        $result = $method->invoke(new VerifyPendingCiencuadras(), [
+            'state' => 'active',
+            'portal_code' => '22130-P103104',
+        ], 'A');
+
+        $this->assertSame('22130-P103104', $result['code']);
+        $this->assertSame('Activo', $result['result']['data']['message'][0]['active']);
+        $this->assertSame('0', $result['result']['data']['message'][0]['status']);
+    }
+
     public function test_auto_sync_trusts_active_property_over_timeout_response(): void
     {
         $method = new ReflectionMethod(AutoSyncCiencuadras::class, 'syncState');

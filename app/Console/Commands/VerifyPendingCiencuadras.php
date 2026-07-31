@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\Integration;
 use App\Models\PortalCredential;
 use App\Models\PropertySyncStatus;
+use App\Services\Portals\CiencuadrasActiveProperties;
 use App\Services\Portals\CiencuadrasClient;
 use App\Services\Portals\CiencuadrasPropertyMapper;
 use Illuminate\Console\Command;
@@ -15,8 +16,11 @@ class VerifyPendingCiencuadras extends Command
 
     protected $description = 'Verifica automáticamente inmuebles pendientes de Ciencuadras y actualiza su estado.';
 
-    public function handle(CiencuadrasClient $client, CiencuadrasPropertyMapper $mapper): int
-    {
+    public function handle(
+        CiencuadrasClient $client,
+        CiencuadrasPropertyMapper $mapper,
+        CiencuadrasActiveProperties $activeProperties
+    ): int {
         $integration = Integration::where('slug', 'ciencuadras')->first();
         if (! $integration) {
             $this->warn('No existe la integración ciencuadras.');
@@ -57,6 +61,10 @@ class VerifyPendingCiencuadras extends Command
             return self::FAILURE;
         }
 
+        $portalStates = $activeProperties->inspectSourceCodes(
+            $pending->pluck('property.code')->filter()->all(),
+            $credential
+        );
         $summary = ['synced' => 0, 'pending' => 0, 'not_synced' => 0, 'error' => 0, 'skipped' => 0];
 
         foreach ($pending as $status) {
@@ -75,7 +83,8 @@ class VerifyPendingCiencuadras extends Command
             $statusResult = $idRequest
                 ? $client->consultStatus(['idRequest' => $idRequest], $credential)
                 : null;
-            $consult = $this->consultPropertyWithFallback($client, $mapper, $externalCode, $credential, $targetStatus);
+            $consult = $this->activeInventoryResult($portalStates->get($code), $targetStatus)
+                ?? $this->consultPropertyWithFallback($client, $mapper, $externalCode, $credential, $targetStatus);
             $externalCode = $consult['code'];
             $propertyResult = $consult['result'];
 
@@ -98,7 +107,6 @@ class VerifyPendingCiencuadras extends Command
                 'external_url' => $this->publicUrlForStatus($syncStatus, $targetStatus, $response, $status->external_url),
                 'last_response' => $response,
                 'last_error' => $error,
-                'last_attempt_at' => now(),
                 'last_synced_at' => $syncStatus === 'synced' ? now() : $status->last_synced_at,
             ]);
             $status->save();
@@ -114,6 +122,33 @@ class VerifyPendingCiencuadras extends Command
         $this->info("Listo. Publicados: {$summary['synced']} | Pendientes: {$summary['pending']} | Revisión manual: {$summary['not_synced']} | Errores: {$summary['error']} | Omitidos: {$summary['skipped']}");
 
         return self::SUCCESS;
+    }
+
+    protected function activeInventoryResult(?array $portalState, ?string $targetStatus): ?array
+    {
+        if (in_array($targetStatus, ['I', 'D'], true)
+            || ($portalState['state'] ?? null) !== 'active'
+            || empty($portalState['portal_code'])) {
+            return null;
+        }
+
+        $portalCode = (string) $portalState['portal_code'];
+
+        return [
+            'code' => $portalCode,
+            'result' => [
+                'ok' => true,
+                'data' => [
+                    'message' => [[
+                        'propertyCode' => $portalCode,
+                        'active' => 'Activo',
+                        'status' => '0',
+                    ]],
+                    'status' => 'success',
+                    'statusCode' => 100,
+                ],
+            ],
+        ];
     }
 
     protected function credential(CiencuadrasClient $client): ?PortalCredential

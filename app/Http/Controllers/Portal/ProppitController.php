@@ -130,6 +130,10 @@ class ProppitController extends Controller
             ]], 422);
         }
 
+        if ($action === 'publish') {
+            $mapped['payload'] = $this->mapper->boostOnPublish($mapped['payload']);
+        }
+
         $token = $this->credential($request)->access_token;
         $publisherId = (string) config('portals.proppit.publisher_external_id');
         $result = $action === 'publish'

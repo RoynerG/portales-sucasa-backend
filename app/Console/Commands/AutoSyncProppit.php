@@ -161,6 +161,10 @@ class AutoSyncProppit extends Command
                     continue;
                 }
 
+                if ($action === 'publish') {
+                    $mapped['payload'] = $mapper->boostOnPublish($mapped['payload']);
+                }
+
                 $referenceId = (string) $mapped['payload']['referenceId'];
                 $result = $action === 'publish'
                     ? $client->createAd($mapped['payload'], $token)

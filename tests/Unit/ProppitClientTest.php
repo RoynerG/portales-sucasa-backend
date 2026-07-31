@@ -96,6 +96,19 @@ class ProppitClientTest extends TestCase
         $this->assertContains('school', $payload['property']['location']['nearbyLocations']);
     }
 
+    public function test_publish_payload_is_boosted_immediately_when_promo_slots_are_enabled(): void
+    {
+        config()->set('portals.proppit.boost_new_listings', true);
+        config()->set('portals.proppit.boosted_weekly_limit', 1);
+
+        $payload = (new ProppitPropertyMapper)->boostOnPublish([
+            'referenceId' => '103025',
+            'isBoosted' => false,
+        ]);
+
+        $this->assertTrue($payload['isBoosted']);
+    }
+
     public function test_get_publisher_returns_its_activation_state(): void
     {
         $client = $this->clientWith([

@@ -244,6 +244,22 @@ class ProppitPropertyMapper
         return $limit > 0 ? $this->weeklyBoostedCodes($limit) : [];
     }
 
+    public function boostOnPublish(array $payload): array
+    {
+        if (! config('portals.proppit.boost_new_listings', true)) {
+            return $payload;
+        }
+
+        $limit = max(0, (int) config('portals.proppit.boosted_weekly_limit', 1));
+        if ($limit === 0) {
+            return $payload;
+        }
+
+        $payload['isBoosted'] = true;
+
+        return $payload;
+    }
+
     protected function weeklyBoostedCodes(int $limit): array
     {
         $week = now()->format('o-W');

@@ -6,6 +6,7 @@ use App\Models\City;
 use App\Models\Property;
 use App\Models\PropertyType;
 use App\Models\TransactionType;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -23,8 +24,7 @@ class ProppitPropertyMapper
 
         abort_unless($row, 404, 'Propiedad no encontrada en wp_jet_cct_inmuebles.');
 
-        $consultant = $this->consultant($row);
-        $payload = $this->payload($row, $consultant);
+        $payload = $this->payload($row);
 
         return [
             'payload' => $payload,
@@ -44,7 +44,7 @@ class ProppitPropertyMapper
         return trim($code);
     }
 
-    protected function payload(stdClass $row, ?stdClass $consultant): array
+    protected function payload(stdClass $row): array
     {
         $description = $this->text(($row->descripcion ?? null) ?: $row->datos_adicionales ?: $row->punto_referencia);
         $title = $this->propertyName($row);
@@ -54,17 +54,18 @@ class ProppitPropertyMapper
         $propertyType = $this->propertyType($row->tipo_inmueble);
         $stratum = (int) ($this->integer($row->estrato) ?? 0);
         $publisherId = (string) config('portals.proppit.publisher_external_id');
-        $phone = $this->phone($consultant->celular ?? null);
-        $email = filter_var($consultant->correo ?? null, FILTER_VALIDATE_EMAIL)
-            ? trim((string) $consultant->correo)
-            : config('portals.proppit.default_contact_email');
+        $phone = $this->phone(config('portals.proppit.default_contact_phone'));
+        $email = trim((string) config('portals.proppit.default_contact_email'));
+        $amenities = $this->amenities($row, $propertyType);
+        $nearbyLocations = $this->nearbyLocations($row, $propertyType);
+        $rules = $this->rules($row, $propertyType);
 
         return array_filter([
             'referenceId' => $this->referenceId((string) $row->codigo),
             'publisher' => ['externalId' => $publisherId],
             'contact' => array_filter([
-                'name' => $this->text($consultant->nombre ?? $row->funcionario ?? config('portals.proppit.default_contact_name')),
-                'email' => $email,
+                'name' => $this->text(config('portals.proppit.default_contact_name')),
+                'email' => filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : null,
                 'phone' => $phone,
                 'whatsapp' => $phone,
             ]),
@@ -72,7 +73,7 @@ class ProppitPropertyMapper
                 'type' => $propertyType,
                 'location' => array_filter([
                     'countryCode' => (string) config('portals.proppit.country', 'CO'),
-                    'visibility' => 'accurate',
+                    'visibility' => (string) config('portals.proppit.location_visibility', 'approximate'),
                     'geo' => array_values(array_filter([
                         $row->ciudad ? ['name' => $this->text($row->ciudad), 'level' => 'locality'] : null,
                         $row->barrio ? ['name' => $this->text($row->barrio), 'level' => 'neighborhood'] : null,
@@ -83,6 +84,7 @@ class ProppitPropertyMapper
                     ],
                     'address' => $this->text($row->direccion_fisica ?: $row->direccion ?: $row->barrio),
                     'postcode' => $this->postalCode($row),
+                    'nearbyLocations' => $nearbyLocations,
                 ]),
                 'communityFees' => $this->money($row->precio_admin) ? [
                     'value' => (float) $this->money($row->precio_admin),
@@ -97,7 +99,7 @@ class ProppitPropertyMapper
             'totalArea' => $area > 0 ? ['value' => $area, 'unit' => 'sqm'] : null,
             'floorArea' => $propertyType !== 'land' && $area > 0 ? ['value' => $area, 'unit' => 'sqm'] : null,
             'usableArea' => $this->number($row->area_privada) ? ['value' => (float) $this->number($row->area_privada), 'unit' => 'sqm'] : null,
-            'isBoosted' => false,
+            'isBoosted' => $this->isBoosted($row),
             'isExclusive' => false,
             'bedrooms' => (int) ($this->integer($row->habitaciones) ?? 0),
             'bathrooms' => (int) ($this->integer($row->banos) ?? 0),
@@ -105,6 +107,8 @@ class ProppitPropertyMapper
             'parkingSpaces' => (int) ($this->integer($row->parqueaderos) ?? 0),
             'condition' => 'second hand',
             'furnished' => $this->yesNo($row->amoblado) ? 'fully' : 'unfurnished',
+            'rules' => $rules,
+            'amenities' => $amenities,
         ], fn ($value) => $value !== null && $value !== '' && $value !== []);
     }
 
@@ -178,7 +182,7 @@ class ProppitPropertyMapper
                 'address' => $payload['property']['location']['address'] ?? null,
                 'lat' => $payload['property']['location']['coordinates']['lat'] ?? null,
                 'lng' => $payload['property']['location']['coordinates']['long'] ?? null,
-                'show_exact_address' => true,
+                'show_exact_address' => config('portals.proppit.location_visibility', 'approximate') === 'accurate',
                 'property_type_id' => $propertyType->id,
                 'transaction_type_id' => $transactionType->id,
                 'sale_price' => $this->money($row->precio_venta),
@@ -213,6 +217,166 @@ class ProppitPropertyMapper
             ->where('id_empleado', $row->id_funcionario)
             ->orWhere('_ID', $row->id_funcionario)
             ->first();
+    }
+
+    protected function isBoosted(stdClass $row): bool
+    {
+        if ($this->yesNo($row->proppit_promocionado ?? null) || $this->yesNo($row->promocion_premium ?? null)) {
+            return true;
+        }
+
+        $limit = max(0, (int) config('portals.proppit.boosted_weekly_limit', 0));
+        if ($limit === 0) {
+            return false;
+        }
+
+        return in_array((string) $row->codigo, $this->weeklyBoostedCodes($limit), true);
+    }
+
+    protected function weeklyBoostedCodes(int $limit): array
+    {
+        $week = now()->format('o-W');
+        $cacheKey = "proppit.boosted-codes.{$week}.{$limit}";
+
+        return Cache::remember($cacheKey, now()->endOfWeek(), function () use ($limit, $week): array {
+            return DB::connection('wordpress')
+                ->table('wp_jet_cct_inmuebles')
+                ->where('cct_status', 'publish')
+                ->whereNotNull('codigo')
+                ->pluck('codigo')
+                ->map(fn ($code) => trim((string) $code))
+                ->filter()
+                ->unique()
+                ->sortBy(fn (string $code) => hash('sha256', $week.'|'.$code))
+                ->take($limit)
+                ->values()
+                ->all();
+        });
+    }
+
+    protected function amenities(stdClass $row, string $propertyType): array
+    {
+        $values = [
+            'disabled access' => ['acceso discapacitados', 'discapacitados'],
+            'water' => ['agua', 'servicio de agua'],
+            'air conditioning' => ['aire acondicionado'],
+            'alarm' => ['alarma'],
+            'car park' => ['aparcadero', 'parqueadero', 'garaje', 'garage'],
+            "children's area" => ['area infantil', 'área infantil', 'parque infantil', 'zona infantil'],
+            'lift' => ['ascensor', 'elevador'],
+            'balcony' => ['balcon', 'balcón'],
+            'grill' => ['bbq', 'barbecue', 'asador'],
+            'heating' => ['calefaccion', 'calefacción'],
+            'tennis court' => ['cancha de tenis', 'tenis'],
+            'guardhouse' => ['caseta de vigilancia', 'vigilancia', 'portería', 'porteria'],
+            'fireplace' => ['chimenea'],
+            'integral kitchen' => ['cocina integral'],
+            'service room' => ['cuarto de servicio', 'habitacion de servicio', 'habitación de servicio'],
+            'natural gas' => ['gas natural'],
+            'gym' => ['gimnasio', 'gym'],
+            'internet' => ['internet'],
+            'jacuzzi' => ['jacuzzi'],
+            'garden' => ['jardin', 'jardín'],
+            'yard' => ['patio'],
+            'swimming pool' => ['piscina'],
+            'security' => ['seguridad privada', 'puerta de seguridad', 'vigilancia'],
+            'sauna' => ['sauna'],
+            'water tank' => ['tanque de agua'],
+            'terrace' => ['terraza'],
+            'panoramic view' => ['vista panoramica', 'vista panorámica'],
+            'wi-fi' => ['wi-fi', 'wifi'],
+            'electricity' => ['electricidad', 'luz'],
+        ];
+
+        return $this->matchedValues($row, $values, $this->allowedValues($propertyType, 'amenities'));
+    }
+
+    protected function nearbyLocations(stdClass $row, string $propertyType): array
+    {
+        $values = [
+            'main street' => ['avenida', 'via principal', 'vía principal', 'calle principal'],
+            'shopping mall' => ['centro comercial', 'centros comerciales'],
+            'school' => ['colegio', 'colegios', 'universidad'],
+            'sea' => ['mar', 'playa'],
+            'train station' => ['estacion de tren', 'estación de tren', 'transcaribe', 'estacion'],
+            'park' => ['parque', 'parques'],
+        ];
+
+        return $this->matchedValues($row, $values, $this->allowedValues($propertyType, 'nearbyLocations'));
+    }
+
+    protected function rules(stdClass $row, string $propertyType): array
+    {
+        $values = [
+            'pets allowed' => ['mascotas permitidas', 'acepta mascotas', 'pet friendly'],
+            'children allowed' => ['permite ninos', 'permite niños', 'niños', 'ninos'],
+            'only families' => ['solo familias', 'familias'],
+        ];
+
+        return $this->matchedValues($row, $values, $this->allowedValues($propertyType, 'rules'));
+    }
+
+    protected function matchedValues(stdClass $row, array $values, array $allowed): array
+    {
+        $haystack = $this->searchText($row);
+
+        return collect($values)
+            ->filter(fn (array $needles, string $value) => in_array($value, $allowed, true)
+                && collect($needles)->contains(fn (string $needle) => str_contains($haystack, $this->normalize($needle))))
+            ->keys()
+            ->values()
+            ->all();
+    }
+
+    protected function searchText(stdClass $row): string
+    {
+        return $this->normalize(implode(' ', array_filter([
+            $row->interiores ?? null,
+            $row->exteriores ?? null,
+            $row->alrededores ?? null,
+            $row->zonas_sociales ?? null,
+            $row->servicios_publicos ?? null,
+            $row->descripcion ?? null,
+            $row->datos_adicionales ?? null,
+            $row->punto_referencia ?? null,
+            $this->yesNo($row->luz ?? null) ? 'luz electricidad' : null,
+            $this->yesNo($row->agua ?? null) ? 'agua' : null,
+            $this->yesNo($row->gas ?? null) ? 'gas natural' : null,
+            $this->yesNo($row->vigilancia ?? null) ? 'vigilancia seguridad privada' : null,
+            $this->yesNo($row->parqueadero ?? null) || (int) ($this->integer($row->parqueaderos ?? null) ?? 0) > 0 ? 'parqueadero aparcadero' : null,
+        ])));
+    }
+
+    protected function allowedValues(string $propertyType, string $kind): array
+    {
+        $common = [
+            'nearbyLocations' => ['main street', 'shopping mall', 'train station', 'park', 'school', 'sea'],
+            'amenities' => ['air conditioning', 'alarm', 'balcony', 'car park', 'cellar', 'electricity', 'equipped kitchen', 'fireplace', 'heating', 'integral kitchen', 'internet', 'jacuzzi', 'natural gas', 'office', 'panoramic view', 'service room', 'terrace', 'water', 'water tank', 'yard', "children's area", 'concierge', 'disabled access', 'garden', 'grill', 'guardhouse', 'gym', 'library', 'lift', 'sauna', 'security', 'swimming pool', 'tennis court', 'wi-fi'],
+            'rules' => ['pets allowed', 'children allowed', 'only families'],
+        ];
+
+        $restricted = [
+            'land' => [
+                'nearbyLocations' => ['main street'],
+                'amenities' => ['car park', 'cellar', 'electricity', 'natural gas', 'water tank', 'guardhouse', 'security'],
+                'rules' => [],
+            ],
+            'commercial' => [
+                'nearbyLocations' => ['main street', 'shopping mall', 'park'],
+                'rules' => [],
+            ],
+            'office' => [
+                'nearbyLocations' => ['main street', 'shopping mall', 'park', 'school'],
+                'rules' => [],
+            ],
+            'industrial unit' => [
+                'nearbyLocations' => ['main street'],
+                'amenities' => ['alarm', 'car park', 'cellar', 'electricity', 'heating', 'water', 'water tank', "children's area", 'concierge', 'disabled access', 'guardhouse', 'gym', 'lift', 'security', 'swimming pool'],
+                'rules' => [],
+            ],
+        ];
+
+        return $restricted[$propertyType][$kind] ?? $common[$kind] ?? [];
     }
 
     protected function operations(stdClass $row): array
@@ -298,6 +462,11 @@ class ProppitPropertyMapper
     protected function text(?string $value): string
     {
         return trim(strip_tags((string) $value));
+    }
+
+    protected function normalize(?string $value): string
+    {
+        return Str::ascii(mb_strtolower($this->text($value), 'UTF-8'));
     }
 
     protected function number($value): ?float

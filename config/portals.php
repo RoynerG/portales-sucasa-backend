@@ -58,6 +58,8 @@ return [
         'default_contact_name' => env('PROPPIT_DEFAULT_CONTACT_NAME', 'Su Casa Inmobiliaria'),
         'default_contact_email' => env('PROPPIT_DEFAULT_CONTACT_EMAIL'),
         'default_contact_phone' => env('PROPPIT_DEFAULT_CONTACT_PHONE'),
+        'location_visibility' => env('PROPPIT_LOCATION_VISIBILITY', 'approximate'),
+        'boosted_weekly_limit' => env('PROPPIT_BOOSTED_WEEKLY_LIMIT', 0),
         'public_url' => env('PROPPIT_PUBLIC_URL'),
     ],
 

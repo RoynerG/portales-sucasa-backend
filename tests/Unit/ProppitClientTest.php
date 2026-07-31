@@ -28,6 +28,70 @@ class ProppitClientTest extends TestCase
         $this->assertSame('SC-53824', $mapper->referenceId('SC-53824'));
     }
 
+    public function test_payload_uses_global_contact_approximate_location_and_proppit_feature_flags(): void
+    {
+        config()->set('portals.proppit.publisher_external_id', 'sucasa');
+        config()->set('portals.proppit.default_contact_name', 'Contacto Global');
+        config()->set('portals.proppit.default_contact_email', 'global@example.test');
+        config()->set('portals.proppit.default_contact_phone', '+573001112233');
+        config()->set('portals.proppit.location_visibility', 'approximate');
+        config()->set('portals.proppit.boosted_weekly_limit', 0);
+
+        $payload = (new TestableProppitPropertyMapper)->payloadForTest((object) [
+            'codigo' => '53824',
+            'descripcion' => 'Casa amplia con piscina, gimnasio, parqueadero y colegios cerca.',
+            'datos_adicionales' => '',
+            'punto_referencia' => '',
+            'area_construida' => 120,
+            'area_terreno' => 160,
+            'foto_portada' => '',
+            'galeria' => '',
+            'tipo_negocio' => 'Venta',
+            'precio_venta' => 450000000,
+            'precio_arriendo' => '',
+            'tipo_inmueble' => 'Casa',
+            'estrato' => 4,
+            'ciudad' => 'Cartagena',
+            'barrio' => 'Manga',
+            'latitud' => '10.4',
+            'longitud' => '-75.5',
+            'direccion_fisica' => 'Direccion exacta',
+            'direccion' => '',
+            'precio_admin' => '',
+            'copropiedad' => '',
+            'area_privada' => 100,
+            'habitaciones' => 3,
+            'banos' => 2,
+            'parqueaderos' => 1,
+            'amoblado' => '',
+            'proppit_promocionado' => 'si',
+            'promocion_premium' => '',
+            'interiores' => 'Cocina integral, aire acondicionado',
+            'exteriores' => 'Piscina, terraza, balcon',
+            'alrededores' => 'Cerca de centros comerciales, colegios y parques',
+            'zonas_sociales' => 'Gimnasio',
+            'servicios_publicos' => 'Agua, gas natural',
+            'luz' => 'si',
+            'agua' => 'si',
+            'gas' => 'si',
+            'vigilancia' => 'si',
+            'parqueadero' => 'si',
+        ]);
+
+        $this->assertSame([
+            'name' => 'Contacto Global',
+            'email' => 'global@example.test',
+            'phone' => '+573001112233',
+            'whatsapp' => '+573001112233',
+        ], $payload['contact']);
+        $this->assertSame('approximate', $payload['property']['location']['visibility']);
+        $this->assertTrue($payload['isBoosted']);
+        $this->assertContains('swimming pool', $payload['amenities']);
+        $this->assertContains('gym', $payload['amenities']);
+        $this->assertContains('shopping mall', $payload['property']['location']['nearbyLocations']);
+        $this->assertContains('school', $payload['property']['location']['nearbyLocations']);
+    }
+
     public function test_get_publisher_returns_its_activation_state(): void
     {
         $client = $this->clientWith([
@@ -92,5 +156,23 @@ class ProppitClientTest extends TestCase
             'handler' => $stack,
             'http_errors' => true,
         ]));
+    }
+}
+
+class TestableProppitPropertyMapper extends ProppitPropertyMapper
+{
+    public function payloadForTest(object $row): array
+    {
+        return $this->payload($row);
+    }
+
+    protected function media(\stdClass $row): array
+    {
+        return ['https://example.test/photo.jpg'];
+    }
+
+    protected function postalCode(\stdClass $row): ?string
+    {
+        return '130001';
     }
 }

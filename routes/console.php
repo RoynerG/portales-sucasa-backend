@@ -16,6 +16,10 @@ Schedule::command('ciencuadras:auto-sync')
     ->everyFiveMinutes()
     ->withoutOverlapping();
 
+Schedule::command('proppit:auto-sync')
+    ->everyFiveMinutes()
+    ->withoutOverlapping();
+
 Schedule::command('mercadolibre:sync-catalog')
     ->dailyAt('03:30')
     ->withoutOverlapping();

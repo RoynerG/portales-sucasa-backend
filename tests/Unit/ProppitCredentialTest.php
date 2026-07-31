@@ -107,6 +107,31 @@ class ProppitCredentialTest extends TestCase
             'phone' => '3001234567',
         ], $client->createdPublisherPayload);
     }
+
+    public function test_invalid_publisher_reference_is_reported_as_a_publisher_configuration_error(): void
+    {
+        Integration::create(['name' => 'Proppit', 'slug' => 'proppit']);
+        $controller = new TestableProppitController(
+            new FakeProppitClient,
+            new ProppitPropertyMapper
+        );
+
+        $result = $controller->decorateForTest([
+            'ok' => false,
+            'data' => [
+                'status' => 400,
+                'body' => [
+                    'status' => 400,
+                    'requestId' => 'dc5izl65g95lpjv32wl1',
+                    'error' => '{"data":{"publisherId":[{"errorType":"invalidReference","message":"Value did not match any entity."}]}}',
+                ],
+            ],
+        ]);
+
+        $this->assertSame('publisher_reference_invalid', $result['portal_error']['code']);
+        $this->assertSame('Publisher no encontrado en Proppit.', $result['portal_error']['message']);
+        $this->assertSame('dc5izl65g95lpjv32wl1', $result['portal_error']['request_id']);
+    }
 }
 
 class TestableProppitController extends ProppitController
@@ -114,6 +139,11 @@ class TestableProppitController extends ProppitController
     public function credentialForTest(Request $request): PortalCredential
     {
         return $this->credential($request);
+    }
+
+    public function decorateForTest(array $result): array
+    {
+        return $this->decorateResult($result);
     }
 }
 

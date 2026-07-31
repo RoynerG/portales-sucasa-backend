@@ -136,7 +136,7 @@ class ProppitController extends Controller
             ? $this->proppit->createAd($mapped['payload'], $token)
             : $this->proppit->updateAd($referenceId, $mapped['payload'], $token);
 
-        if ($action === 'publish' && $this->isPublisherNotFound($result) && $publisherId !== '') {
+        if ($action === 'publish' && $this->isPublisherReferenceMissing($result) && $publisherId !== '') {
             $publisher = $this->ensurePublisher($publisherId, $token);
             if (($publisher['ok'] ?? false) && ($publisher['created'] ?? false)) {
                 $result = $this->proppit->createAd($mapped['payload'], $token);
@@ -324,10 +324,10 @@ class ProppitController extends Controller
         $requestId = is_array($body) ? (string) ($body['requestId'] ?? '') : '';
         $normalized = strtolower($portalMessage);
 
-        if ($this->isPublisherNotFound($result)) {
+        if ($this->isPublisherReferenceMissing($result)) {
             $message = 'Publisher no encontrado en Proppit.';
-            $resolution = 'El backend intentará crear el publisher cuando pruebes la API. Si ya fue creado, espera aprobación de soporte Proppit o reporta el Request ID.';
-            $code = 'publisher_not_found';
+            $resolution = 'El Publisher ID configurado no existe para este Client ID/país o todavía no fue habilitado por Proppit. El backend intentará crearlo; si persiste, reporta el Request ID a soporte.';
+            $code = $this->isPublisherNotFound($result) ? 'publisher_not_found' : 'publisher_reference_invalid';
         } elseif (str_contains($normalized, 'invalid credentials')) {
             $message = 'Client ID o Client Secret inválidos.';
             $resolution = 'Revisa PROPPIT_CLIENT_ID y PROPPIT_CLIENT_SECRET y vuelve a probar la API.';
@@ -358,6 +358,38 @@ class ProppitController extends Controller
             : (string) data_get($result, 'data.error', '');
 
         return str_contains(strtolower($portalMessage), 'publisher not found');
+    }
+
+    protected function isPublisherReferenceMissing(array $result): bool
+    {
+        if ($this->isPublisherNotFound($result)) {
+            return true;
+        }
+
+        $body = data_get($result, 'data.body');
+        $portalMessage = is_array($body)
+            ? (string) ($body['error'] ?? '')
+            : (string) data_get($result, 'data.error', '');
+        $decoded = json_decode($portalMessage, true);
+
+        if (is_array($decoded)) {
+            $publisherErrors = data_get($decoded, 'data.publisherId', []);
+            if (is_array($publisherErrors)) {
+                foreach ($publisherErrors as $error) {
+                    if (
+                        is_array($error)
+                        && strtolower((string) ($error['errorType'] ?? '')) === 'invalidreference'
+                    ) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        $normalized = strtolower($portalMessage);
+
+        return str_contains($normalized, 'publisherid')
+            && str_contains($normalized, 'invalidreference');
     }
 
     protected function integration(): Integration

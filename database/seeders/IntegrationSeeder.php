@@ -25,11 +25,11 @@ class IntegrationSeeder extends Seeder
                 'name' => 'Fincaraíz',
                 'slug' => 'fincaraiz',
                 'api_class' => 'App\\Services\\Portals\\FincaraizClient',
-                'description' => 'Portal inmobiliario #1 en Colombia. API Kong.',
+                'description' => 'API oficial asíncrona de Fincaraíz con ambientes QA y producción.',
                 'icon' => 'fa-house-chimney',
                 'color' => '#2196f3',
                 'website_url' => 'https://www.fincaraiz.com.co',
-                'config_schema' => ['fields' => ['api_key']],
+                'config_schema' => ['fields' => ['api_key', 'client_id', 'client_agent', 'contact_email', 'contact_phone']],
                 'order' => 2,
             ],
             [

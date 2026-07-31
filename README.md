@@ -83,6 +83,12 @@ SANCTUM_STATEFUL_DOMAINS=localhost:5173,127.0.0.1:5173
 MERCADOLIBRE_CLIENT_ID=
 MERCADOLIBRE_CLIENT_SECRET=
 FINCARAIZ_API_KEY=
+FINCARAIZ_ENV=qa
+FINCARAIZ_CLIENT_ID=
+FINCARAIZ_CLIENT_AGENT=
+FINCARAIZ_CONTACT_EMAIL=
+FINCARAIZ_CONTACT_PHONE=
+FINCARAIZ_CONTACT_WHATSAPP=
 CIENCUADRAS_EMAIL=
 CIENCUADRAS_PASSWORD=
 CIENCUADRAS_SHOW_ADDRESS=false
@@ -286,11 +292,19 @@ backend/
 | GET    | `/api/portals/mercadolibre/callback` | no | Callback OAuth (intercambia code→token) |
 | POST   | `/api/portals/mercadolibre/webhook` | no | Webhook de notificaciones |
 | POST   | `/api/portals/properties/{code}/fincaraiz/publish` | sí | Publicar en FR |
+| GET    | `/api/portals/fincaraiz/status` | sí | Estado y ambiente de FR |
+| GET    | `/api/portals/fincaraiz/client` | sí | Probar credenciales y consultar cliente/agentes |
+| GET    | `/api/portals/properties/{code}/fincaraiz/payload` | sí | Preflight del payload FR |
+| POST   | `/api/portals/properties/{code}/fincaraiz/verify` | sí | Consultar la tarea asíncrona FR |
+| POST   | `/api/portals/properties/{code}/fincaraiz/activate` | sí | Activar el aviso FR creado |
+| POST   | `/api/portals/fincaraiz/webhook` | no | Recibir resultados asíncronos FR |
 | POST   | `/api/portals/properties/{code}/ciencuadras/publish` | sí | Publicar en CC |
 | POST   | `/api/portals/properties/{code}/proppit/publish` | sí | Publicar en Proppit |
 | POST   | `/api/portals/properties/{code}/proppit/update` | sí | Actualizar en Proppit |
 | POST   | `/api/portals/properties/{code}/proppit/pause` | sí | Despublicar en Proppit |
 | POST   | `/api/portals/properties/{code}/proppit/verify` | sí | Verificar en Proppit |
+
+La configuración, prueba en QA y promoción segura de Fincaraíz están documentadas en [`docs/FINCARAIZ.md`](docs/FINCARAIZ.md).
 
 ## Troubleshooting
 

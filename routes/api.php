@@ -80,13 +80,22 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/properties/{code}/mercadolibre/close', [MercadoLibreController::class, 'close']);
         Route::post('/properties/{code}/mercadolibre/verify', [MercadoLibreController::class, 'verify']);
 
+        Route::get('/fincaraiz/status', [FincaraizController::class, 'status']);
+        Route::patch('/fincaraiz/settings', [FincaraizController::class, 'saveSettings']);
         Route::get('/fincaraiz/client', [FincaraizController::class, 'clientInfo']);
+        Route::get('/fincaraiz/listings', [FincaraizController::class, 'listings']);
+        Route::get('/fincaraiz/locations', [FincaraizController::class, 'locations']);
+        Route::post('/fincaraiz/webhook/subscribe', [FincaraizController::class, 'subscribeWebhook']);
         Route::get('/automation', [PortalAutomationController::class, 'index']);
         Route::get('/errors', [PortalErrorController::class, 'index']);
         Route::get('/{portal}/bulk-candidates', [PortalBulkController::class, 'candidates']);
+        Route::get('/properties/{code}/fincaraiz/payload', [FincaraizController::class, 'payload']);
+        Route::patch('/properties/{code}/fincaraiz/location', [FincaraizController::class, 'saveLocation']);
         Route::post('/properties/{code}/fincaraiz/publish', [FincaraizController::class, 'publish']);
         Route::post('/properties/{code}/fincaraiz/update', [FincaraizController::class, 'update']);
         Route::post('/properties/{code}/fincaraiz/pause', [FincaraizController::class, 'pause']);
+        Route::post('/properties/{code}/fincaraiz/activate', [FincaraizController::class, 'activate']);
+        Route::post('/properties/{code}/fincaraiz/verify', [FincaraizController::class, 'verify']);
 
         Route::post('/ciencuadras/login', [CiencuadrasController::class, 'login']);
         Route::post('/ciencuadras/bulk', [CiencuadrasController::class, 'bulk']);
@@ -114,3 +123,4 @@ Route::middleware('auth:sanctum')->group(function () {
 // Callbacks y webhooks (sin auth, validados por su propio mecanismo)
 Route::get('/portals/mercadolibre/callback', [MercadoLibreController::class, 'callback'])->name('ml.callback');
 Route::post('/portals/mercadolibre/webhook', [MercadoLibreController::class, 'webhook']);
+Route::post('/portals/fincaraiz/webhook', [FincaraizController::class, 'webhook']);

@@ -1,35 +1,55 @@
 <?php
 
+$fincaraizEnvironment = env('FINCARAIZ_ENV', 'qa');
+$fincaraizUrls = [
+    'mock' => 'https://virtserver.swaggerhub.com/Fincaraiz.com.co/Integradores/1.0.0',
+    'qa' => 'https://kong-qa.frcol.io/management/api/1.0',
+    'production' => 'https://msi-infofinca.fincaraiz.com.co/management/api/1.0',
+];
+
 return [
 
     'mercadolibre' => [
-        'client_id'     => env('MERCADOLIBRE_CLIENT_ID'),
+        'client_id' => env('MERCADOLIBRE_CLIENT_ID'),
         'client_secret' => env('MERCADOLIBRE_CLIENT_SECRET'),
-        'redirect_uri'  => env('MERCADOLIBRE_REDIRECT_URI'),
-        'api_url'       => env('MERCADOLIBRE_API_URL', 'https://api.mercadolibre.com'),
-        'auth_url'      => env('MERCADOLIBRE_AUTH_URL', 'https://auth.mercadolibre.com.co'),
-        'site_id'       => env('MERCADOLIBRE_SITE_ID', 'MCO'),
-        'country_id'    => env('MERCADOLIBRE_COUNTRY_ID', 'CO'),
-        'currency_id'   => env('MERCADOLIBRE_CURRENCY_ID', 'COP'),
-        'account_key'   => env('MERCADOLIBRE_ACCOUNT_KEY', 'shared'),
-        'environment'   => env('MERCADOLIBRE_ENV', 'production'),
+        'redirect_uri' => env('MERCADOLIBRE_REDIRECT_URI'),
+        'api_url' => env('MERCADOLIBRE_API_URL', 'https://api.mercadolibre.com'),
+        'auth_url' => env('MERCADOLIBRE_AUTH_URL', 'https://auth.mercadolibre.com.co'),
+        'site_id' => env('MERCADOLIBRE_SITE_ID', 'MCO'),
+        'country_id' => env('MERCADOLIBRE_COUNTRY_ID', 'CO'),
+        'currency_id' => env('MERCADOLIBRE_CURRENCY_ID', 'COP'),
+        'account_key' => env('MERCADOLIBRE_ACCOUNT_KEY', 'shared'),
+        'environment' => env('MERCADOLIBRE_ENV', 'production'),
         'webhook_queue' => env('MERCADOLIBRE_WEBHOOK_QUEUE', 'mercadolibre'),
         'default_listing_type' => env('MERCADOLIBRE_DEFAULT_LISTING_TYPE', 'silver'),
     ],
 
     'fincaraiz' => [
-        'api_url' => env('FINCARAIZ_API_URL', 'https://kong.fincaraiz.com.co/management/api/1.0'),
+        'environment' => $fincaraizEnvironment,
+        'api_url' => env('FINCARAIZ_API_URL', $fincaraizUrls[$fincaraizEnvironment] ?? $fincaraizUrls['qa']),
         'api_key' => env('FINCARAIZ_API_KEY'),
+        'client_id' => env('FINCARAIZ_CLIENT_ID'),
+        'client_agent' => env('FINCARAIZ_CLIENT_AGENT'),
+        'contact_email' => env('FINCARAIZ_CONTACT_EMAIL'),
+        'contact_phone' => env('FINCARAIZ_CONTACT_PHONE'),
+        'contact_whatsapp' => env('FINCARAIZ_CONTACT_WHATSAPP'),
+        'show_exact_address' => env('FINCARAIZ_SHOW_EXACT_ADDRESS', false),
+        'dual_offer' => env('FINCARAIZ_DUAL_OFFER', 'sale'),
+        'cache_buster_name' => env('FINCARAIZ_CACHE_BUSTER_NAME', 'sucasa-cache'),
+        'webhook_id' => env('FINCARAIZ_WEBHOOK_ID'),
+        'webhook_verify_token' => env('FINCARAIZ_WEBHOOK_VERIFY_TOKEN'),
+        'webhook_url' => env('FINCARAIZ_WEBHOOK_URL'),
+        'timeout' => env('FINCARAIZ_TIMEOUT', 30),
     ],
 
     'ciencuadras' => [
         'environment' => env('CIENCUADRAS_ENV', 'production'),
-        'api_url'     => env('CIENCUADRAS_API_URL', 'https://ws-api.ciencuadras.com'),
-        'page_url'    => env('CIENCUADRAS_PAGE_URL', 'https://www.ciencuadras.com'),
-        'username'    => env('CIENCUADRAS_USERNAME', env('CIENCUADRAS_EMAIL')),
-        'email'       => env('CIENCUADRAS_EMAIL'),
-        'password'    => env('CIENCUADRAS_PASSWORD'),
-        'integrator'  => env('CIENCUADRAS_INTEGRATOR', 'SUCASA'),
+        'api_url' => env('CIENCUADRAS_API_URL', 'https://ws-api.ciencuadras.com'),
+        'page_url' => env('CIENCUADRAS_PAGE_URL', 'https://www.ciencuadras.com'),
+        'username' => env('CIENCUADRAS_USERNAME', env('CIENCUADRAS_EMAIL')),
+        'email' => env('CIENCUADRAS_EMAIL'),
+        'password' => env('CIENCUADRAS_PASSWORD'),
+        'integrator' => env('CIENCUADRAS_INTEGRATOR', 'SUCASA'),
         'property_code_prefix' => env('CIENCUADRAS_PROPERTY_CODE_PREFIX', '22130-'),
         'default_city_id' => env('CIENCUADRAS_DEFAULT_CITY_ID'),
         'default_locality_id' => env('CIENCUADRAS_DEFAULT_LOCALITY_ID'),

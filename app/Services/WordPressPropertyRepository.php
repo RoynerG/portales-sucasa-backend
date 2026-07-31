@@ -301,6 +301,7 @@ class WordPressPropertyRepository
         $expected = match ($portal) {
             'ciencuadras' => config('portals.ciencuadras.environment', 'production'),
             'mercadolibre' => config('portals.mercadolibre.environment', 'production'),
+            'fincaraiz' => config('portals.fincaraiz.environment', 'qa'),
             default => 'production',
         };
 

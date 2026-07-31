@@ -2,11 +2,10 @@
 
 namespace App\Services\Portals;
 
-use App\Models\PortalCredential;
-use App\Models\Property;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class FincaraizClient
 {
@@ -14,142 +13,170 @@ class FincaraizClient
 
     public function getClientInfo(string $apiKey): array
     {
-        return $this->request('GET', '/client', null, ['apikey' => $apiKey]);
+        return $this->getClients($apiKey);
     }
 
-    public function listListings(string $apiKey, int $page = 1, int $pageSize = 20): array
+    public function getClients(string $apiKey): array
     {
-        return $this->request('GET', '/listing', null, [
-            'apikey' => $apiKey,
-            'page' => $page,
-            'page_size' => $pageSize,
+        return $this->request('GET', '/client', $apiKey);
+    }
+
+    public function getClient(string $clientId, string $apiKey): array
+    {
+        return $this->request('GET', '/client/'.rawurlencode($clientId), $apiKey);
+    }
+
+    public function getAgents(string $clientId, string $apiKey): array
+    {
+        return $this->request('GET', '/client/'.rawurlencode($clientId).'/agent', $apiKey);
+    }
+
+    public function findLocations(string $name, string $apiKey): array
+    {
+        return $this->request('GET', '/location/'.rawurlencode($name), $apiKey);
+    }
+
+    public function listListings(
+        string $apiKey,
+        string $clientId,
+        int $page = 1,
+        int $pageSize = 20,
+        ?string $search = null,
+        string $ordering = '-created'
+    ): array {
+        return $this->request('GET', '/listing', $apiKey, null, array_filter([
+            'page' => max(1, $page),
+            'page_size' => min(100, max(1, $pageSize)),
+            'search' => $search,
+            'ordering' => $ordering,
+        ], fn ($value) => $value !== null && $value !== ''), [
+            'Cookie' => $clientId,
         ]);
     }
 
     public function getListing(string $apiKey, string $listingId): array
     {
-        return $this->request('GET', "/listing/{$listingId}", null, ['apikey' => $apiKey]);
+        return $this->request('GET', '/listing/'.rawurlencode($listingId), $apiKey);
     }
 
     public function createListing(array $payload, string $apiKey): array
     {
-        return $this->request('POST', '/listing', $payload, ['apikey' => $apiKey]);
+        return $this->request('POST', '/listing', $apiKey, $this->batch($payload));
     }
 
     public function updateListing(string $listingId, array $payload, string $apiKey): array
     {
-        return $this->request('PATCH', '/listing', ['listing_id' => $listingId] + $payload, ['apikey' => $apiKey]);
+        $items = $this->batch($payload);
+        $items = array_map(
+            fn (array $item) => ['listing_id' => $listingId] + $item,
+            $items
+        );
+
+        return $this->request('PATCH', '/listing', $apiKey, $items);
     }
 
     public function changeStatus(string $listingId, string $status, string $clientId, string $apiKey): array
     {
-        return $this->request('PATCH', '/listing/status', [[
+        return $this->request('PATCH', '/listing/status', $apiKey, [[
             'listing_id' => $listingId,
             'client_id' => $clientId,
-            'status' => $status,
-        ]], ['apikey' => $apiKey]);
+            'status' => strtoupper($status),
+        ]]);
+    }
+
+    public function validateListings(string $clientId, array $identifiers, string $apiKey): array
+    {
+        return $this->request('POST', '/validate-listing', $apiKey, ['client_id' => $clientId] + $identifiers);
     }
 
     public function getTask(string $taskId, string $apiKey): array
     {
-        return $this->request('GET', "/task/{$taskId}", null, ['apikey' => $apiKey]);
+        return $this->request('GET', '/task/'.rawurlencode($taskId), $apiKey);
     }
 
-    public function buildPayload(Property $property): array
+    public function subscribeWebhook(string $webhookId, string $target, string $apiKey, ?string $clientId = null): array
     {
-        $property->loadMissing(['propertyType', 'transactionType', 'neighborhood', 'images']);
-
-        return [
-            'title' => $property->title,
-            'description' => $property->description,
-            'property_type_id' => $this->homologateType($property->propertyType?->slug),
-            'transaction_type' => $this->homologateTransaction($property->transactionType?->slug),
-            'price' => [
-                'value' => (float) ($property->display_price ?? 0),
-                'currency' => $property->currency ?? 'COP',
-                'period' => str_contains($property->transactionType?->slug ?? '', 'rent') ? 'monthly' : 'total',
-            ],
-            'area' => [
-                'total' => (float) ($property->area_total ?? $property->area_land ?? 0),
-                'covered' => (float) ($property->area_built ?? 0),
-                'private' => (float) ($property->area_private ?? 0),
-                'unit' => 'm2',
-            ],
-            'rooms' => min(19, (int) ($property->bedrooms ?? 0)),
-            'baths' => min(9, (int) ($property->bathrooms ?? 0)),
-            'garages' => min(10, (int) ($property->parking_spaces ?? 0)),
-            'floor' => min(16, (int) ($property->floor_number ?? 0)),
-            'stratum' => $property->stratum,
-            'age' => $property->age_years,
-            'condition' => $property->condition ?? 'used',
-            'address' => [
-                'street' => $property->address,
-                'neighborhood' => $property->neighborhood?->name,
-                'city_id' => null,
-                'lat' => (float) $property->lat,
-                'lng' => (float) $property->lng,
-            ],
-            'images' => $property->images
-                ->map(fn ($image) => ['url' => $image->url])
-                ->values()
-                ->all(),
-            'contact' => [
-                'name' => $property->contact_name,
-                'email' => $property->contact_email,
-                'phone' => $property->contact_phone,
-                'whatsapp' => $property->contact_whatsapp,
-            ],
-        ];
+        return $this->request(
+            'POST',
+            '/webhook/'.rawurlencode($webhookId).'/subscribe',
+            $apiKey,
+            array_filter(['target' => $target, 'client_id' => $clientId])
+        );
     }
 
-    protected function homologateType(?string $type): string
+    public function unsubscribeWebhook(string $webhookId, string $apiKey): array
     {
-        $map = [
-            'apartamento'  => 'APT',
-            'casa'         => 'HOUSE',
-            'apartaestudio' => 'APT',
-            'oficina'      => 'OFFICE',
-            'local'        => 'COMMERCIAL',
-            'lote'         => 'LOT',
-            'finca'        => 'FARM',
-            'bodega'       => 'WAREHOUSE',
-            'edificio'     => 'BUILDING',
-        ];
-        return $map[strtolower($type ?? '')] ?? 'APT';
+        return $this->request('POST', '/webhook/'.rawurlencode($webhookId).'/unsubscribe', $apiKey);
     }
 
-    protected function homologateTransaction(?string $type): string
-    {
-        $t = strtolower($type ?? '');
-        if (str_contains($t, 'rent') || str_contains($t, 'arriendo')) {
-            return 'rent';
+    protected function request(
+        string $method,
+        string $path,
+        string $apiKey,
+        ?array $body = null,
+        array $query = [],
+        array $headers = []
+    ): array {
+        if (strtoupper($method) === 'GET') {
+            $query[$this->cacheBusterName()] = (string) Str::uuid();
         }
-        return 'sale';
-    }
 
-    protected function request(string $method, string $path, array|string|null $body, array $query = []): array
-    {
         $options = [
             'query' => $query,
-            'headers' => ['Accept' => 'application/json'],
+            'headers' => [
+                'Accept' => 'application/json',
+                'Content-Type' => 'application/json',
+                'apikey' => $apiKey,
+                ...$headers,
+            ],
+            'timeout' => (float) config('portals.fincaraiz.timeout', 30),
         ];
-        if (is_array($body)) {
+        if ($body !== null) {
             $options['json'] = $body;
         }
+
         try {
-            $response = $this->http->request($method, config('portals.fincaraiz.api_url') . $path, $options);
+            $response = $this->http->request(
+                $method,
+                rtrim((string) config('portals.fincaraiz.api_url'), '/').$path,
+                $options
+            );
+            $status = $response->getStatusCode();
+            $raw = (string) $response->getBody();
+            $decoded = $raw === '' ? [] : json_decode($raw, true);
+            $data = json_last_error() === JSON_ERROR_NONE ? $decoded : ['raw' => $raw];
+
             return [
-                'ok' => true,
-                'status' => $response->getStatusCode(),
-                'data' => json_decode((string) $response->getBody(), true),
+                'ok' => $status >= 200 && $status < 300,
+                'status' => $status,
+                'data' => $data,
             ];
         } catch (GuzzleException $e) {
-            Log::warning('FR request failed', ['path' => $path, 'err' => $e->getMessage()]);
+            Log::warning('Fincaraiz request failed', [
+                'environment' => config('portals.fincaraiz.environment'),
+                'path' => $path,
+                'error' => $e->getMessage(),
+            ]);
+
             return [
                 'ok' => false,
-                'status' => $e->getCode() ?: 500,
+                'status' => method_exists($e, 'getResponse') && $e->getResponse()
+                    ? $e->getResponse()->getStatusCode()
+                    : 502,
                 'data' => ['error' => $e->getMessage()],
             ];
         }
+    }
+
+    protected function batch(array $payload): array
+    {
+        return array_is_list($payload) ? $payload : [$payload];
+    }
+
+    protected function cacheBusterName(): string
+    {
+        $name = trim((string) config('portals.fincaraiz.cache_buster_name', 'sucasa-cache'));
+
+        return $name !== '' ? $name : 'sucasa-cache';
     }
 }

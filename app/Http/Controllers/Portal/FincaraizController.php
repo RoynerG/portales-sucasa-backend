@@ -4,100 +4,397 @@ namespace App\Http\Controllers\Portal;
 
 use App\Http\Controllers\Controller;
 use App\Models\Integration;
+use App\Models\PortalCredential;
 use App\Models\Property;
 use App\Models\PropertySyncStatus;
 use App\Services\Portals\FincaraizClient;
+use App\Services\Portals\FincaraizPropertyMapper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 
 class FincaraizController extends Controller
 {
-    public function __construct(protected FincaraizClient $fr) {}
+    public function __construct(
+        protected FincaraizClient $fr,
+        protected FincaraizPropertyMapper $mapper
+    ) {}
+
+    public function status(Request $request): JsonResponse
+    {
+        $settings = $this->settings($request);
+
+        return response()->json(['Datos' => [
+            'configured' => ! empty($settings['api_key']),
+            'client_configured' => ! empty($settings['client_id']),
+            'environment' => config('portals.fincaraiz.environment'),
+            'api_url' => config('portals.fincaraiz.api_url'),
+            'client_id' => $settings['client_id'] ?? null,
+            'client_agent' => $settings['client_agent'] ?? null,
+            'contact_email' => $settings['contact_email'] ?? null,
+            'contact_phone' => $settings['contact_phone'] ?? null,
+            'contact_whatsapp' => $settings['contact_whatsapp'] ?? null,
+            'show_exact_address' => (bool) ($settings['show_exact_address'] ?? false),
+            'dual_offer' => $settings['dual_offer'] ?? 'sale',
+            'api_key_source' => $this->userCredential($request)?->access_token ? 'panel' : 'environment',
+            'webhook_configured' => ! empty(config('portals.fincaraiz.webhook_id'))
+                && ! empty(config('portals.fincaraiz.webhook_verify_token')),
+        ]]);
+    }
+
+    public function saveSettings(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'api_key' => ['nullable', 'string', 'max:4096'],
+            'client_id' => ['required', 'uuid'],
+            'client_agent' => ['nullable', 'integer', 'min:1'],
+            'contact_email' => ['nullable', 'email', 'max:255'],
+            'contact_phone' => ['nullable', 'string', 'max:40'],
+            'contact_whatsapp' => ['nullable', 'string', 'max:40'],
+            'show_exact_address' => ['required', 'boolean'],
+            'dual_offer' => ['required', 'in:sale,rent'],
+        ]);
+        $existing = $this->userCredential($request);
+        $apiKey = trim((string) ($data['api_key'] ?? ''));
+        abort_unless($apiKey !== '' || $existing?->access_token || config('portals.fincaraiz.api_key'), 422, 'Ingresa la API key de Fincaraíz.');
+
+        $credential = $existing ?? new PortalCredential;
+        $credential->fill([
+            'user_id' => $request->user()->id,
+            'integration_id' => $this->integration()->id,
+            'account_key' => 'user:'.$request->user()->id,
+            'data' => Arr::except($data, ['api_key']),
+        ]);
+        if ($apiKey !== '') {
+            $credential->access_token = $apiKey;
+        }
+        $credential->save();
+
+        return $this->status($request);
+    }
 
     public function clientInfo(Request $request): JsonResponse
     {
-        $apiKey = config('portals.fincaraiz.api_key');
-        abort_unless($apiKey, 400, 'No se ha configurado la API key de Fincaraíz.');
-        return response()->json(['Datos' => $this->fr->getClientInfo($apiKey)]);
+        $settings = $this->settings($request);
+        $apiKey = $this->apiKey($settings);
+        $clients = $this->fr->getClientInfo($apiKey);
+        $agents = null;
+        if ($clients['ok'] && ! empty($settings['client_id'])) {
+            $agents = $this->fr->getAgents((string) $settings['client_id'], $apiKey);
+        }
+
+        return response()->json(['Datos' => [
+            'ok' => $clients['ok'] && ($agents === null || $agents['ok']),
+            'environment' => config('portals.fincaraiz.environment'),
+            'clients' => $clients,
+            'agents' => $agents,
+        ]]);
+    }
+
+    public function locations(Request $request): JsonResponse
+    {
+        $data = $request->validate(['name' => ['required', 'string', 'min:2', 'max:120']]);
+        $result = $this->fr->findLocations($data['name'], $this->apiKey($this->settings($request)));
+
+        return response()->json(['Datos' => $result]);
     }
 
     public function listings(Request $request): JsonResponse
     {
-        $apiKey = $this->apiKey($request);
-        $page = (int) $request->query('page', 1);
-        $size = (int) $request->query('page_size', 20);
-        return response()->json(['Datos' => $this->fr->listListings($apiKey, $page, $size)]);
+        $settings = $this->settings($request);
+        $clientId = $this->clientId($settings);
+        $result = $this->fr->listListings(
+            $this->apiKey($settings),
+            $clientId,
+            (int) $request->query('page', 1),
+            (int) $request->query('page_size', 20),
+            $request->query('search'),
+            (string) $request->query('ordering', '-created')
+        );
+
+        return response()->json(['Datos' => $result]);
+    }
+
+    public function payload(Request $request, string $code): JsonResponse
+    {
+        $mapped = $this->mapper->map($code, $this->settings($request));
+
+        return response()->json(['Datos' => Arr::except($mapped, ['property'])]);
+    }
+
+    public function saveLocation(Request $request, string $code): JsonResponse
+    {
+        $location = $request->validate([
+            'location_id' => ['required', 'uuid'],
+            'name' => ['required', 'string', 'max:200'],
+            'location_type' => ['nullable', 'string', 'max:40'],
+            'country' => ['nullable', 'string', 'max:100'],
+            'state' => ['nullable', 'string', 'max:100'],
+            'city' => ['nullable', 'string', 'max:100'],
+        ]);
+        $mapped = $this->mapper->saveLocationMapping($code, $location, $this->settings($request));
+
+        return response()->json(['Datos' => Arr::except($mapped, ['property'])]);
     }
 
     public function publish(Request $request, string $code): JsonResponse
     {
-        $property = Property::where('code', $code)->firstOrFail();
-        $apiKey = $this->apiKey($request);
-
-        $payload = $this->fr->buildPayload($property);
-        $result = $this->fr->createListing($payload, $apiKey);
-
-        if ($result['ok'] && isset($result['data']['listing_id'])) {
-            $property->syncStatuses()->updateOrCreate(
-                ['integration_id' => $this->integration()->id],
-                [
-                    'sync_status' => 'synced',
-                    'external_id' => $result['data']['listing_id'],
-                    'last_response' => $result['data'],
-                    'last_synced_at' => now(),
-                    'last_attempt_at' => now(),
-                ]
-            );
-            $property->update(['status' => 'active']);
+        $settings = $this->settings($request);
+        $mapped = $this->mapper->map($code, $settings);
+        if ($mapped['errors'] !== []) {
+            return response()->json(['Datos' => $this->mappingError($mapped)], 422);
         }
 
-        return response()->json(['Datos' => $result]);
+        $result = $this->fr->createListing($mapped['payload'], $this->apiKey($settings));
+        $this->storeQueuedResult($mapped['property'], $result, 'publish');
+
+        return response()->json(['Datos' => $this->operationResult($result, $mapped)]);
     }
 
     public function update(Request $request, string $code): JsonResponse
     {
-        $property = Property::where('code', $code)->firstOrFail();
-        $sync = $this->syncStatus($property);
-        abort_unless($sync?->external_id, 400, 'No publicada en Fincaraíz.');
-
-        $apiKey = $this->apiKey($request);
-        $payload = $this->fr->buildPayload($property);
-        $result = $this->fr->updateListing($sync->external_id, $payload, $apiKey);
-
-        if ($result['ok']) {
-            $sync->update([
-                'sync_status' => 'synced',
-                'last_response' => $result['data'] ?? null,
-                'last_synced_at' => now(),
-                'last_attempt_at' => now(),
-            ]);
-            $property->update(['status' => 'active']);
+        $settings = $this->settings($request);
+        $mapped = $this->mapper->map($code, $settings);
+        $sync = $this->syncStatus($mapped['property']);
+        abort_unless($sync?->external_id, 400, 'No hay listing_id confirmado para actualizar en Fincaraíz.');
+        if ($mapped['errors'] !== []) {
+            return response()->json(['Datos' => $this->mappingError($mapped)], 422);
         }
-        return response()->json(['Datos' => $result]);
+
+        $result = $this->fr->updateListing(
+            $sync->external_id,
+            $mapped['payload'],
+            $this->apiKey($settings)
+        );
+        $this->storeQueuedResult($mapped['property'], $result, 'update');
+
+        return response()->json(['Datos' => $this->operationResult($result, $mapped)]);
     }
 
     public function pause(Request $request, string $code): JsonResponse
     {
+        return $this->changeStatus($request, $code, 'DISABLED', 'pause');
+    }
+
+    public function activate(Request $request, string $code): JsonResponse
+    {
+        return $this->changeStatus($request, $code, 'ACTIVE', 'activate');
+    }
+
+    public function verify(Request $request, string $code): JsonResponse
+    {
         $property = Property::where('code', $code)->firstOrFail();
         $sync = $this->syncStatus($property);
-        abort_unless($sync?->external_id, 400, 'No publicada en Fincaraíz.');
+        abort_unless($sync, 400, 'No existe una sincronización de Fincaraíz para verificar.');
+        $taskId = trim((string) ($request->input('task_id') ?: $this->storedTaskId($sync)));
+        abort_unless($taskId, 400, 'No hay task_id pendiente para verificar.');
 
-        $clientId = config('portals.fincaraiz.client_id', 'local-client');
-        $apiKey = $this->apiKey($request);
-        $result = $this->fr->changeStatus($sync->external_id, 'DELETED', $clientId, $apiKey);
-
+        $result = $this->fr->getTask($taskId, $this->apiKey($this->settings($request)));
         if ($result['ok']) {
-            $sync->update(['sync_status' => 'paused', 'last_response' => $result['data'] ?? null]);
-            $property->update(['status' => 'paused']);
+            $this->applyTaskResult($property, $result['data'], $sync);
+        } else {
+            $sync->update([
+                'last_response' => $this->storedResponse($sync, $result['data'] ?? [], $taskId),
+                'last_error' => $this->errorMessage($result),
+                'last_attempt_at' => now(),
+                'attempts' => $sync->attempts + 1,
+            ]);
         }
+
+        return response()->json(['Datos' => $result + [
+            'sync_status' => $sync->fresh()->sync_status,
+            'external_id' => $sync->fresh()->external_id,
+        ]]);
+    }
+
+    public function subscribeWebhook(Request $request): JsonResponse
+    {
+        $settings = $this->settings($request);
+        $webhookId = trim((string) config('portals.fincaraiz.webhook_id'));
+        $target = trim((string) config('portals.fincaraiz.webhook_url'));
+        abort_unless($webhookId && $target, 400, 'Configura FINCARAIZ_WEBHOOK_ID y FINCARAIZ_WEBHOOK_URL.');
+        $result = $this->fr->subscribeWebhook(
+            $webhookId,
+            $target,
+            $this->apiKey($settings),
+            $settings['client_id'] ?? null
+        );
+
         return response()->json(['Datos' => $result]);
     }
 
-    protected function apiKey(Request $request): string
+    public function webhook(Request $request): JsonResponse
     {
-        $key = config('portals.fincaraiz.api_key');
-        abort_unless($key, 400, 'No se ha configurado la API key de Fincaraíz.');
+        $expectedId = trim((string) config('portals.fincaraiz.webhook_id'));
+        $expectedToken = trim((string) config('portals.fincaraiz.webhook_verify_token'));
+        if ($expectedId === '' || $expectedToken === '') {
+            return response()->json(['Datos' => ['ok' => false, 'error' => 'Webhook no configurado.']], 503);
+        }
+
+        $hubId = $this->normalizedHeader($request, 'hub-id');
+        $verifyToken = $this->normalizedHeader($request, 'verify-token');
+        if (! hash_equals($expectedId, $hubId) || ! hash_equals($expectedToken, $verifyToken)) {
+            return response()->json(['Datos' => ['ok' => false, 'error' => 'Webhook no autorizado.']], 401);
+        }
+
+        $payload = $request->json()->all();
+        $contents = data_get($payload, 'task.content', []);
+        $processed = 0;
+        foreach (is_array($contents) ? $contents : [] as $content) {
+            $code = trim((string) ($content['external_code'] ?? ''));
+            $property = $code !== '' ? Property::where('code', $code)->first() : null;
+            if (! $property) {
+                continue;
+            }
+            $this->applyTaskResult($property, array_replace_recursive($payload, [
+                'task' => ['content' => [$content]],
+            ]), $this->syncStatus($property));
+            $processed++;
+        }
+
+        return response()->json(['Datos' => ['ok' => true, 'processed' => $processed]]);
+    }
+
+    protected function changeStatus(Request $request, string $code, string $status, string $action): JsonResponse
+    {
+        $property = Property::where('code', $code)->firstOrFail();
+        $sync = $this->syncStatus($property);
+        abort_unless($sync?->external_id, 400, 'No hay listing_id confirmado en Fincaraíz.');
+        $settings = $this->settings($request);
+        $result = $this->fr->changeStatus(
+            $sync->external_id,
+            $status,
+            $this->clientId($settings),
+            $this->apiKey($settings)
+        );
+        $this->storeQueuedResult($property, $result, $action);
+
+        return response()->json(['Datos' => $result + ['sync_status' => $result['ok'] ? 'pending' : 'error']]);
+    }
+
+    protected function storeQueuedResult(Property $property, array $result, string $action): PropertySyncStatus
+    {
+        $taskId = $this->taskId($result['data'] ?? []);
+        $ok = $result['ok'] && $taskId !== null;
+        $sync = $this->syncStatus($property);
+
+        return $property->syncStatuses()->updateOrCreate(
+            [
+                'integration_id' => $this->integration()->id,
+                'environment' => config('portals.fincaraiz.environment'),
+                'portal_variant' => 'default',
+            ],
+            [
+                'sync_status' => $ok ? 'pending' : 'error',
+                'external_id' => $sync?->external_id,
+                'last_response' => [
+                    'action' => $action,
+                    'task_id' => $taskId,
+                    'portal' => $result['data'] ?? null,
+                ],
+                'last_error' => $ok ? null : ($taskId === null && $result['ok']
+                    ? 'Fincaraíz no devolvió task.id.'
+                    : $this->errorMessage($result)),
+                'last_attempt_at' => now(),
+                'attempts' => ($sync?->attempts ?? 0) + 1,
+            ]
+        );
+    }
+
+    protected function applyTaskResult(Property $property, array $data, ?PropertySyncStatus $sync = null): PropertySyncStatus
+    {
+        $sync ??= $this->syncStatus($property);
+        $action = (string) data_get($sync?->last_response, 'action', 'publish');
+        $task = $data['task'] ?? [];
+        $taskStatus = strtoupper((string) ($task['status'] ?? ''));
+        $content = collect($task['content'] ?? [])->first(
+            fn (array $item) => (string) ($item['external_code'] ?? '') === (string) $property->code
+        ) ?? collect($task['content'] ?? [])->first() ?? [];
+        $contentStatus = strtoupper((string) ($content['status'] ?? ''));
+        $terminalStatus = $contentStatus ?: $taskStatus;
+        $listingId = $content['listing_id'] ?? $sync?->external_id;
+        $taskId = $task['id'] ?? $this->storedTaskId($sync);
+        $success = in_array($terminalStatus, ['COMPLETED'], true)
+            || ($terminalStatus === 'FORWARDED' && ! empty($listingId));
+        $requiresActivation = $success && in_array($action, ['publish', 'activate_required'], true);
+
+        $syncStatus = match (true) {
+            in_array($taskStatus, ['ERROR'], true) || in_array($contentStatus, ['ERROR'], true) => 'error',
+            ! $success => 'pending',
+            $action === 'pause' => 'paused',
+            $requiresActivation => 'pending',
+            default => 'synced',
+        };
+        $lastError = $syncStatus === 'error'
+            ? $this->taskErrorMessage($data)
+            : null;
+
+        return $property->syncStatuses()->updateOrCreate(
+            [
+                'integration_id' => $this->integration()->id,
+                'environment' => config('portals.fincaraiz.environment'),
+                'portal_variant' => 'default',
+            ],
+            [
+                'sync_status' => $syncStatus,
+                'external_id' => $listingId,
+                'last_response' => [
+                    'action' => $requiresActivation ? 'activate_required' : $action,
+                    'task_id' => $taskId,
+                    'requires_activation' => $requiresActivation,
+                    'fr_property_id' => $content['fr_property_id'] ?? null,
+                    'portal' => $data,
+                ],
+                'last_error' => $lastError,
+                'last_synced_at' => $syncStatus === 'synced' || $syncStatus === 'paused' ? now() : $sync?->last_synced_at,
+                'last_attempt_at' => now(),
+                'attempts' => ($sync?->attempts ?? 0) + 1,
+            ]
+        );
+    }
+
+    protected function settings(Request $request): array
+    {
+        $credential = $this->userCredential($request);
+        $data = $credential?->data ?? [];
+        if ($credential?->access_token) {
+            $data['api_key'] = $credential->access_token;
+        }
+
+        return array_merge([
+            'api_key' => config('portals.fincaraiz.api_key'),
+            'client_id' => config('portals.fincaraiz.client_id'),
+            'client_agent' => config('portals.fincaraiz.client_agent'),
+            'contact_email' => config('portals.fincaraiz.contact_email'),
+            'contact_phone' => config('portals.fincaraiz.contact_phone'),
+            'contact_whatsapp' => config('portals.fincaraiz.contact_whatsapp'),
+            'show_exact_address' => config('portals.fincaraiz.show_exact_address', false),
+            'dual_offer' => config('portals.fincaraiz.dual_offer', 'sale'),
+        ], array_filter($data, fn ($value) => $value !== null && $value !== ''));
+    }
+
+    protected function userCredential(Request $request): ?PortalCredential
+    {
+        return $request->user() ? PortalCredential::where([
+            'user_id' => $request->user()->id,
+            'integration_id' => $this->integration()->id,
+        ])->first() : null;
+    }
+
+    protected function apiKey(array $settings): string
+    {
+        $key = trim((string) ($settings['api_key'] ?? ''));
+        abort_unless($key, 400, 'No se ha configurado FINCARAIZ_API_KEY.');
+
         return $key;
+    }
+
+    protected function clientId(array $settings): string
+    {
+        $clientId = trim((string) ($settings['client_id'] ?? ''));
+        abort_unless($clientId, 400, 'No se ha configurado FINCARAIZ_CLIENT_ID.');
+
+        return $clientId;
     }
 
     protected function integration(): Integration
@@ -109,6 +406,83 @@ class FincaraizController extends Controller
     {
         return $property->syncStatuses()
             ->where('integration_id', $this->integration()->id)
+            ->where('environment', config('portals.fincaraiz.environment'))
+            ->where('portal_variant', 'default')
             ->first();
+    }
+
+    protected function taskId(array $data): ?string
+    {
+        $id = data_get($data, 'task.id');
+
+        return is_string($id) && trim($id) !== '' ? trim($id) : null;
+    }
+
+    protected function storedTaskId(?PropertySyncStatus $sync): ?string
+    {
+        $id = data_get($sync?->last_response, 'task_id')
+            ?: data_get($sync?->last_response, 'portal.task.id');
+
+        return is_string($id) && trim($id) !== '' ? trim($id) : null;
+    }
+
+    protected function storedResponse(PropertySyncStatus $sync, array $portal, string $taskId): array
+    {
+        return [
+            'action' => data_get($sync->last_response, 'action'),
+            'task_id' => $taskId,
+            'portal' => $portal,
+        ];
+    }
+
+    protected function operationResult(array $result, array $mapped): array
+    {
+        return $result + [
+            'sync_status' => $result['ok'] && $this->taskId($result['data'] ?? []) ? 'pending' : 'error',
+            'warnings' => $mapped['warnings'],
+            'source' => $mapped['source'],
+        ];
+    }
+
+    protected function mappingError(array $mapped): array
+    {
+        return [
+            'ok' => false,
+            'status' => 422,
+            'errors' => $mapped['errors'],
+            'warnings' => $mapped['warnings'],
+            'payload' => $mapped['payload'],
+            'source' => $mapped['source'],
+        ];
+    }
+
+    protected function errorMessage(array $result): string
+    {
+        $data = $result['data'] ?? [];
+
+        return (string) ($data['detail'] ?? $data['error'] ?? data_get($data, 'body.detail')
+            ?? data_get($data, 'body.error') ?? 'Fincaraíz rechazó la solicitud.');
+    }
+
+    protected function taskErrorMessage(array $data): string
+    {
+        $messages = data_get($data, 'task.messages');
+        if (is_array($messages) && $messages !== []) {
+            return json_encode($messages, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+
+        return 'La tarea de Fincaraíz terminó con error.';
+    }
+
+    protected function normalizedHeader(Request $request, string $expected): string
+    {
+        foreach ($request->headers->all() as $name => $values) {
+            $normalized = str_replace(['.', '_'], '-', strtolower($name));
+            if ($normalized === $expected) {
+                return trim((string) ($values[0] ?? ''));
+            }
+        }
+
+        return '';
     }
 }

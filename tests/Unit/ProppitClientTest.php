@@ -46,6 +46,7 @@ class ProppitClientTest extends TestCase
             'area_terreno' => 160,
             'foto_portada' => '',
             'galeria' => '',
+            'video' => 'https://www.youtube.com/watch?v=abc123xyz',
             'tipo_negocio' => 'Venta',
             'precio_venta' => 450000000,
             'precio_arriendo' => '',
@@ -86,6 +87,9 @@ class ProppitClientTest extends TestCase
         ], $payload['contact']);
         $this->assertSame('approximate', $payload['property']['location']['visibility']);
         $this->assertTrue($payload['isBoosted']);
+        $this->assertSame([
+            ['url' => 'https://www.youtube.com/watch?v=abc123xyz'],
+        ], $payload['multimedia']['videos']);
         $this->assertContains('swimming pool', $payload['amenities']);
         $this->assertContains('gym', $payload['amenities']);
         $this->assertContains('shopping mall', $payload['property']['location']['nearbyLocations']);

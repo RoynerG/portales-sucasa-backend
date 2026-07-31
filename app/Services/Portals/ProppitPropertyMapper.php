@@ -50,6 +50,7 @@ class ProppitPropertyMapper
         $title = $this->propertyName($row);
         $area = (float) ($this->number($row->area_construida) ?? $this->number($row->area_terreno) ?? 0);
         $pictures = collect($this->media($row))->map(fn (string $url) => ['url' => $url])->values()->all();
+        $videos = collect($this->videos($row))->map(fn (string $url) => ['url' => $url])->values()->all();
         $operations = $this->operations($row);
         $propertyType = $this->propertyType($row->tipo_inmueble);
         $stratum = (int) ($this->integer($row->estrato) ?? 0);
@@ -95,7 +96,10 @@ class ProppitPropertyMapper
             'operations' => $operations,
             'title' => ['locale' => 'es-CO', 'text' => $title],
             'description' => ['locale' => 'es-CO', 'text' => $description],
-            'multimedia' => ['pictures' => $pictures],
+            'multimedia' => array_filter([
+                'pictures' => $pictures,
+                'videos' => $videos,
+            ], fn ($value) => $value !== []),
             'totalArea' => $area > 0 ? ['value' => $area, 'unit' => 'sqm'] : null,
             'floorArea' => $propertyType !== 'land' && $area > 0 ? ['value' => $area, 'unit' => 'sqm'] : null,
             'usableArea' => $this->number($row->area_privada) ? ['value' => (float) $this->number($row->area_privada), 'unit' => 'sqm'] : null,
@@ -446,6 +450,17 @@ class ProppitPropertyMapper
             ->pluck('guid', 'ID');
 
         return $ids->map(fn (int $id) => $images[$id] ?? null)->filter()->values()->all();
+    }
+
+    protected function videos(stdClass $row): array
+    {
+        return collect(preg_split('/[\r\n,]+/', (string) ($row->video ?? ''), -1, PREG_SPLIT_NO_EMPTY))
+            ->map(fn (string $url) => trim(strip_tags($url)))
+            ->map(fn (string $url) => str_starts_with($url, 'http://') ? 'https://'.substr($url, 7) : $url)
+            ->filter(fn (string $url) => filter_var($url, FILTER_VALIDATE_URL) && preg_match('~^https://~i', $url))
+            ->unique()
+            ->values()
+            ->all();
     }
 
     protected function postalCode(stdClass $row): ?string

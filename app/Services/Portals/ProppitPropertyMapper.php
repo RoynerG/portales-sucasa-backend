@@ -233,6 +233,13 @@ class ProppitPropertyMapper
         return in_array((string) $row->codigo, $this->weeklyBoostedCodes($limit), true);
     }
 
+    public function boostedCodes(?int $limit = null): array
+    {
+        $limit = max(0, (int) ($limit ?? config('portals.proppit.boosted_weekly_limit', 0)));
+
+        return $limit > 0 ? $this->weeklyBoostedCodes($limit) : [];
+    }
+
     protected function weeklyBoostedCodes(int $limit): array
     {
         $week = now()->format('o-W');

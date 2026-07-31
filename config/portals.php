@@ -60,6 +60,7 @@ return [
         'default_contact_phone' => env('PROPPIT_DEFAULT_CONTACT_PHONE'),
         'location_visibility' => env('PROPPIT_LOCATION_VISIBILITY', 'approximate'),
         'boosted_weekly_limit' => env('PROPPIT_BOOSTED_WEEKLY_LIMIT', 0),
+        'boosted_refresh_limit' => env('PROPPIT_BOOSTED_REFRESH_LIMIT', 300),
         'public_url' => env('PROPPIT_PUBLIC_URL'),
     ],
 

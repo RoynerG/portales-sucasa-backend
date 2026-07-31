@@ -19,3 +19,7 @@ Schedule::command('ciencuadras:auto-sync')
 Schedule::command('mercadolibre:sync-catalog')
     ->dailyAt('03:30')
     ->withoutOverlapping();
+
+Schedule::command('proppit:refresh-boosted')
+    ->weeklyOn(1, '04:00')
+    ->withoutOverlapping();

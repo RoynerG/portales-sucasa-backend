@@ -21,6 +21,7 @@ class PortalAutomationController extends Controller
         $portal = trim((string) $request->query('portal', 'all'));
         $status = trim((string) $request->query('status', 'all'));
         $action = trim((string) $request->query('action', 'all'));
+        $errorType = trim((string) $request->query('error_type', 'all'));
         $search = trim((string) $request->query('search', ''));
         $page = max(1, (int) $request->query('page', 1));
         $perPage = min(100, max(10, (int) $request->query('per_page', $request->query('limit', 25))));
@@ -51,11 +52,17 @@ class PortalAutomationController extends Controller
             });
         }
 
-        $allItems = $query
+        $baseItems = $query
             ->orderByRaw('COALESCE(last_attempt_at, last_synced_at, updated_at) DESC')
             ->get()
             ->map(fn (PropertySyncStatus $sync) => $this->itemPayload($sync))
             ->filter(fn (array $item) => $action === 'all' || $item['action'] === $action)
+            ->values();
+        $errorTypes = $this->errorTypesPayload($baseItems);
+        $allItems = $baseItems
+            ->filter(fn (array $item) => $errorType === ''
+                || $errorType === 'all'
+                || ($item['error_summary']['type'] ?? 'unknown') === $errorType)
             ->values();
 
         $total = $allItems->count();
@@ -74,9 +81,29 @@ class PortalAutomationController extends Controller
                 'active' => $integration->active,
             ])->values(),
             'summary' => $this->summaryPayload($allItems, $portal),
+            'error_types' => $errorTypes,
             'pagination' => $this->paginationPayload($page, $perPage, $total),
             'items' => $items,
         ]]);
+    }
+
+    protected function errorTypesPayload($items): array
+    {
+        return collect($items)
+            ->where('sync_status', 'error')
+            ->groupBy(fn (array $item) => $item['error_summary']['type'] ?? 'unknown')
+            ->map(function ($group, string $type) {
+                $summary = $group->first()['error_summary'] ?? [];
+
+                return [
+                    'id' => $type,
+                    'label' => $summary['type_label'] ?? 'Sin clasificar',
+                    'count' => $group->count(),
+                ];
+            })
+            ->sortByDesc('count')
+            ->values()
+            ->all();
     }
 
     protected function itemPayload(PropertySyncStatus $sync): array

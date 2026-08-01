@@ -168,7 +168,7 @@ class CiencuadrasStateResolutionTest extends TestCase
         $this->assertSame('22130-103104', $result['code']);
     }
 
-    public function test_auto_sync_only_publishes_a_property_without_portal_history(): void
+    public function test_auto_sync_publishes_properties_without_history_or_missing_from_portal(): void
     {
         $method = new ReflectionMethod(AutoSyncCiencuadras::class, 'decision');
         $row = (object) ['estado' => 'Publicado', 'fecha_actualizacion' => null, 'cct_modified' => null];
@@ -187,7 +187,7 @@ class CiencuadrasStateResolutionTest extends TestCase
             new PropertySyncStatus(['sync_status' => 'error', 'attempts' => 1]),
             false
         ));
-        $this->assertNull($method->invoke(
+        $this->assertSame(['publish', 'A'], $method->invoke(
             $command,
             $row,
             new PropertySyncStatus(['sync_status' => 'not_synced', 'attempts' => 30]),

@@ -32,7 +32,7 @@ class VerifyPendingCiencuadras extends Command
             ->where('integration_id', $integration->id)
             ->where('environment', config('portals.ciencuadras.environment'))
             ->where(function ($query) {
-                $query->whereIn('sync_status', ['pending', 'syncing', 'not_synced'])
+                $query->whereIn('sync_status', ['pending', 'syncing'])
                     ->orWhere(function ($query) {
                         $query->where('sync_status', 'error')
                             ->where(function ($query) {

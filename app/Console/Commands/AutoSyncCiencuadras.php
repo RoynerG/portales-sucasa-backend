@@ -11,6 +11,7 @@ use App\Services\Portals\CiencuadrasActiveProperties;
 use App\Services\Portals\CiencuadrasPropertyMapper;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use stdClass;
@@ -65,10 +66,22 @@ class AutoSyncCiencuadras extends Command
             ->select(['codigo', 'estado', 'fecha_actualizacion', 'cct_modified'])
             ->where('cct_status', 'publish');
 
+        $rotationKey = 'ciencuadras.auto-sync-offset.'.config('portals.ciencuadras.environment');
+        $scanOffset = 0;
+        $totalRows = 0;
+
         if ($codes->isNotEmpty()) {
             $rowsQuery->whereIn('codigo', $codes->all());
         } else {
-            $rowsQuery->orderByDesc('cct_modified')->limit($scan);
+            $totalRows = (clone $rowsQuery)->count();
+            $scanOffset = $totalRows > 0
+                ? ((int) Cache::get($rotationKey, 0)) % $totalRows
+                : 0;
+
+            $rowsQuery
+                ->orderBy('codigo')
+                ->offset($scanOffset)
+                ->limit($scan);
         }
 
         $rows = $rowsQuery->get();
@@ -90,12 +103,15 @@ class AutoSyncCiencuadras extends Command
             ->keyBy('property_id');
 
         $executed = 0;
+        $scanned = 0;
         $summary = ['publish' => 0, 'update' => 0, 'pause' => 0, 'skipped' => 0, 'error' => 0];
 
         foreach ($rows as $row) {
             if ($executed >= $limit) {
                 break;
             }
+
+            $scanned++;
 
             $code = (string) $row->codigo;
             if ($code === '') {
@@ -204,6 +220,17 @@ class AutoSyncCiencuadras extends Command
             }
         }
 
+        if ($codes->isEmpty() && $totalRows > 0) {
+            $nextOffset = ($scanOffset + $scanned) % $totalRows;
+            if (! $dryRun) {
+                Cache::put($rotationKey, $nextOffset, now()->addDay());
+            }
+            $cursorMessage = $dryRun
+                ? 'simulación; cursor sin cambios'
+                : "próxima corrida desde {$nextOffset}";
+            $this->line("Escaneo: {$scanned} de {$totalRows} inmuebles; {$cursorMessage}.");
+        }
+
         $this->info("Listo. Publicar: {$summary['publish']} | Actualizar: {$summary['update']} | Despublicar: {$summary['pause']} | Omitidos: {$summary['skipped']} | Errores: {$summary['error']}");
 
         return self::SUCCESS;
@@ -227,7 +254,11 @@ class AutoSyncCiencuadras extends Command
                 return ['update', 'A'];
             }
 
-            if (in_array($current, ['error', 'not_synced'], true)) {
+            if ($current === 'not_synced') {
+                return ['publish', 'A'];
+            }
+
+            if ($current === 'error') {
                 return $retryErrors ? ['update', 'A'] : null;
             }
 

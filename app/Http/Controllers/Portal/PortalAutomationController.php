@@ -195,6 +195,7 @@ class PortalAutomationController extends Controller
             'synced_local' => $localSynced,
             'portal_active' => $portalActive,
             'unconfirmed' => $portalActive === null ? 0 : max(0, $localSynced - $synced),
+            'not_synced' => $items->where('sync_status', 'not_synced')->count(),
             'paused' => $items->where('sync_status', 'paused')->count(),
             'error' => $items->where('sync_status', 'error')->count(),
             'publish' => $items->where('action', 'publish')->count(),
@@ -225,7 +226,7 @@ class PortalAutomationController extends Controller
                 'auto_sync' => (bool) config('portals.ciencuadras.auto_sync'),
                 'limit' => (int) config('portals.ciencuadras.auto_sync_limit', 20),
                 'scan' => (int) config('portals.ciencuadras.auto_sync_scan', 500),
-                'schedule' => 'Ciencuadras auto-sync cada 5 minutos; verificación de pendientes cada minuto.',
+                'schedule' => 'Ciencuadras reconcilia cada 10 minutos, publica cada 5 y verifica pendientes cada minuto.',
             ];
         }
 
@@ -240,7 +241,7 @@ class PortalAutomationController extends Controller
             'auto_sync' => (bool) config('portals.ciencuadras.auto_sync'),
             'limit' => (int) config('portals.ciencuadras.auto_sync_limit', 20),
             'scan' => (int) config('portals.ciencuadras.auto_sync_scan', 500),
-            'schedule' => 'Auto-sync cada 5 minutos; verificación de pendientes cada minuto.',
+            'schedule' => 'Reconciliación cada 10 minutos, auto-sync cada 5 y verificación cada minuto.',
         ];
     }
 }

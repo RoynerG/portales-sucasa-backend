@@ -12,6 +12,11 @@ Schedule::command('ciencuadras:verify-pending --limit=25')
     ->everyMinute()
     ->withoutOverlapping();
 
+Schedule::command('ciencuadras:reconcile-active --grace=30')
+    ->everyTenMinutes()
+    ->when(fn () => (bool) config('portals.ciencuadras.auto_sync'))
+    ->withoutOverlapping();
+
 Schedule::command('ciencuadras:auto-sync')
     ->everyFiveMinutes()
     ->withoutOverlapping();

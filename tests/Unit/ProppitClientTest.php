@@ -109,6 +109,62 @@ class ProppitClientTest extends TestCase
         $this->assertTrue($payload['isBoosted']);
     }
 
+    public function test_sale_and_rent_properties_are_sent_to_proppit_as_rent_only(): void
+    {
+        config()->set('portals.proppit.publisher_external_id', 'sucasa');
+        config()->set('portals.proppit.default_contact_name', 'Contacto Global');
+        config()->set('portals.proppit.default_contact_email', 'global@example.test');
+        config()->set('portals.proppit.default_contact_phone', '+573001112233');
+        config()->set('portals.proppit.location_visibility', 'approximate');
+        config()->set('portals.proppit.boosted_weekly_limit', 0);
+
+        $payload = (new TestableProppitPropertyMapper)->payloadForTest((object) [
+            'codigo' => '53825',
+            'descripcion' => 'Apartamento amplio publicado como arriendo venta para Proppit.',
+            'datos_adicionales' => '',
+            'punto_referencia' => '',
+            'area_construida' => 90,
+            'area_terreno' => '',
+            'foto_portada' => '',
+            'galeria' => '',
+            'video' => '',
+            'tipo_negocio' => 'Arriendo/Venta',
+            'precio_venta' => 320000000,
+            'precio_arriendo' => 2500000,
+            'tipo_inmueble' => 'Apartamento',
+            'estrato' => 4,
+            'ciudad' => 'Cartagena',
+            'barrio' => 'Manga',
+            'latitud' => '10.4',
+            'longitud' => '-75.5',
+            'direccion_fisica' => 'Direccion exacta',
+            'direccion' => '',
+            'precio_admin' => '',
+            'copropiedad' => '',
+            'area_privada' => 80,
+            'habitaciones' => 2,
+            'banos' => 2,
+            'parqueaderos' => 1,
+            'amoblado' => '',
+            'proppit_promocionado' => '',
+            'promocion_premium' => '',
+            'interiores' => '',
+            'exteriores' => '',
+            'alrededores' => '',
+            'zonas_sociales' => '',
+            'servicios_publicos' => '',
+            'luz' => 'si',
+            'agua' => 'si',
+            'gas' => 'si',
+            'vigilancia' => '',
+            'parqueadero' => 'si',
+        ]);
+
+        $this->assertSame([
+            ['type' => 'rent', 'price' => ['value' => 2500000.0, 'currency' => 'COP']],
+        ], $payload['operations']);
+    }
+
     public function test_get_publisher_returns_its_activation_state(): void
     {
         $client = $this->clientWith([

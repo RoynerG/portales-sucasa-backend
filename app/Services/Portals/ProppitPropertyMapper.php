@@ -409,12 +409,21 @@ class ProppitPropertyMapper
     protected function operations(stdClass $row): array
     {
         $slug = Str::slug($row->tipo_negocio ?? '');
-        $operations = [];
-        if (str_contains($slug, 'venta') && $this->money($row->precio_venta)) {
-            $operations[] = ['type' => 'sell', 'price' => ['value' => (float) $this->money($row->precio_venta), 'currency' => 'COP']];
+        $hasSell = str_contains($slug, 'venta');
+        $hasRent = str_contains($slug, 'arriendo') || str_contains($slug, 'renta');
+        $rentPrice = $this->money($row->precio_arriendo);
+        $salePrice = $this->money($row->precio_venta);
+
+        if ($hasSell && $hasRent && $rentPrice) {
+            return [['type' => 'rent', 'price' => ['value' => (float) $rentPrice, 'currency' => 'COP']]];
         }
-        if ((str_contains($slug, 'arriendo') || str_contains($slug, 'renta')) && $this->money($row->precio_arriendo)) {
-            $operations[] = ['type' => 'rent', 'price' => ['value' => (float) $this->money($row->precio_arriendo), 'currency' => 'COP']];
+
+        $operations = [];
+        if ($hasSell && $salePrice) {
+            $operations[] = ['type' => 'sell', 'price' => ['value' => (float) $salePrice, 'currency' => 'COP']];
+        }
+        if ($hasRent && $rentPrice) {
+            $operations[] = ['type' => 'rent', 'price' => ['value' => (float) $rentPrice, 'currency' => 'COP']];
         }
 
         return $operations;

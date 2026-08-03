@@ -294,6 +294,8 @@ backend/
 | POST   | `/api/portals/properties/{code}/fincaraiz/publish` | sí | Publicar en FR |
 | GET    | `/api/portals/fincaraiz/status` | sí | Estado y ambiente de FR |
 | GET    | `/api/portals/fincaraiz/client` | sí | Probar credenciales y consultar cliente/agentes |
+| GET    | `/api/portals/fincaraiz/neighborhoods` | sí | Listar homologaciones de barrios FR |
+| PATCH  | `/api/portals/fincaraiz/neighborhoods/{id}` | sí | Guardar UUID oficial del barrio FR |
 | GET    | `/api/portals/properties/{code}/fincaraiz/payload` | sí | Preflight del payload FR |
 | POST   | `/api/portals/properties/{code}/fincaraiz/verify` | sí | Consultar la tarea asíncrona FR |
 | POST   | `/api/portals/properties/{code}/fincaraiz/activate` | sí | Activar el aviso FR creado |

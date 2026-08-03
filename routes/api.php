@@ -10,6 +10,7 @@ use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Portal\CiencuadrasController;
 use App\Http\Controllers\Portal\CiencuadrasMappingController;
 use App\Http\Controllers\Portal\FincaraizController;
+use App\Http\Controllers\Portal\FincaraizNeighborhoodController;
 use App\Http\Controllers\Portal\MercadoLibreController;
 use App\Http\Controllers\Portal\PortalAutomationController;
 use App\Http\Controllers\Portal\PortalBulkController;
@@ -86,6 +87,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/fincaraiz/listings', [FincaraizController::class, 'listings']);
         Route::post('/fincaraiz/reconcile', [FincaraizController::class, 'reconcile']);
         Route::get('/fincaraiz/locations', [FincaraizController::class, 'locations']);
+        Route::get('/fincaraiz/neighborhoods', [FincaraizNeighborhoodController::class, 'index']);
+        Route::patch('/fincaraiz/neighborhoods/{id}', [FincaraizNeighborhoodController::class, 'update']);
         Route::post('/fincaraiz/webhook/subscribe', [FincaraizController::class, 'subscribeWebhook']);
         Route::get('/automation', [PortalAutomationController::class, 'index']);
         Route::get('/errors', [PortalErrorController::class, 'index']);

@@ -71,6 +71,14 @@ El preflight valida antes de enviar los campos obligatorios del contrato:
 
 El UUID del barrio (`location_main_id`) se obtiene con `GET /location/{name}`. En el panel, abre el inmueble, entra a **Portales → Fincaraíz → Preflight** y pulsa **Buscar y homologar barrio**. Busca por nombre, confirma ciudad/departamento y elige preferiblemente un resultado de tipo `NEIGHBOURHOOD`. El panel guarda el UUID para todos los inmuebles del mismo barrio local. Si aún no está homologado, el payload sigue siendo válido con coordenadas y muestra una advertencia. Los IDs ficticios del seeder no se envían.
 
+También se puede administrar todo el catálogo desde **Barrios → Fincaraíz**. La migración agrega en WordPress:
+
+- `wp_jet_cct_barrios.fincaraiz_location_id`;
+- `wp_jet_cct_barrios.fincaraiz_location_name`;
+- `wp_jet_cct_barrios.fincaraiz_location_type`.
+
+La selección solo permite guardar resultados oficiales de tipo `NEIGHBOURHOOD` y sincroniza el UUID con `portal_mappings`, que es la homologación consumida por el preflight de todos los inmuebles del mismo barrio.
+
 ## Flujo de prueba recomendado
 
 1. Solicitar a Fincaraíz una API key, Client ID y, si aplica, Agent ID de **QA**.

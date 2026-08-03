@@ -8,6 +8,7 @@ use App\Models\PortalCredential;
 use App\Models\Property;
 use App\Models\PropertySyncStatus;
 use App\Services\Portals\FincaraizClient;
+use App\Services\Portals\FincaraizListingReconciler;
 use App\Services\Portals\FincaraizPropertyMapper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,7 +18,8 @@ class FincaraizController extends Controller
 {
     public function __construct(
         protected FincaraizClient $fr,
-        protected FincaraizPropertyMapper $mapper
+        protected FincaraizPropertyMapper $mapper,
+        protected ?FincaraizListingReconciler $reconciler = null
     ) {}
 
     public function status(Request $request): JsonResponse
@@ -46,7 +48,7 @@ class FincaraizController extends Controller
     {
         $data = $request->validate([
             'api_key' => ['nullable', 'string', 'max:4096'],
-            'client_id' => ['required', 'uuid'],
+            'client_id' => ['nullable', 'uuid'],
             'client_agent' => ['nullable', 'integer', 'min:1'],
             'contact_email' => ['nullable', 'email', 'max:255'],
             'contact_phone' => ['nullable', 'string', 'max:40'],
@@ -112,7 +114,53 @@ class FincaraizController extends Controller
             (string) $request->query('ordering', '-created')
         );
 
+        if ($result['ok'] ?? false) {
+            $rows = data_get($result, 'data.results', []);
+            $ids = collect($rows)->pluck('id')->filter()->values();
+            $references = PropertySyncStatus::query()
+                ->where('integration_id', $this->integration()->id)
+                ->where('environment', config('portals.fincaraiz.environment'))
+                ->where('portal_variant', 'default')
+                ->whereIn('external_id', $ids)
+                ->with('property:id,code')
+                ->get()
+                ->keyBy('external_id');
+
+            data_set($result, 'data.results', collect($rows)->map(function (array $listing) use ($references) {
+                $reference = $references->get($listing['id'] ?? null);
+
+                return $listing + [
+                    'locally_referenced' => (bool) $reference,
+                    'local_code' => $reference?->property?->code,
+                ];
+            })->values()->all());
+        }
+
         return response()->json(['Datos' => $result]);
+    }
+
+    public function reconcile(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'limit' => ['sometimes', 'integer', 'min:1', 'max:25'],
+            'dry_run' => ['sometimes', 'boolean'],
+            'confirmed' => ['required_if:dry_run,false', 'boolean'],
+        ]);
+        $dryRun = (bool) ($data['dry_run'] ?? true);
+        if (! $dryRun) {
+            abort_unless(($data['confirmed'] ?? false) === true, 422, 'Confirma que deseas guardar las referencias locales.');
+        }
+
+        $settings = $this->settings($request);
+        $this->apiKey($settings);
+        $this->clientId($settings);
+        $reconciler = $this->reconciler ?? app(FincaraizListingReconciler::class);
+
+        return response()->json(['Datos' => $reconciler->reconcile(
+            $settings,
+            (int) ($data['limit'] ?? 10),
+            $dryRun
+        )]);
     }
 
     public function payload(Request $request, string $code): JsonResponse

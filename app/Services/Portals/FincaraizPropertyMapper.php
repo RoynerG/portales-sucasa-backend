@@ -47,21 +47,39 @@ class FincaraizPropertyMapper
     public function map(string $code, array $settings = []): array
     {
         if (config('sources.properties') === 'wordpress') {
-            $row = DB::connection('wordpress')
-                ->table('wp_jet_cct_inmuebles')
-                ->where('cct_status', 'publish')
-                ->where('codigo', $code)
-                ->first();
-
+            $row = $this->sourceRow($code);
             abort_unless($row, 404, 'Propiedad no encontrada en WordPress.');
 
             return $this->mapProperty($this->localProperty($row), $settings, $row);
         }
 
-        return $this->mapProperty(
-            Property::where('code', $code)->firstOrFail(),
-            $settings
-        );
+        return $this->mapProperty($this->ensureLocalProperty($code), $settings);
+    }
+
+    public function ensureLocalProperty(string $code): Property
+    {
+        if (config('sources.properties') === 'wordpress') {
+            $row = $this->sourceRow($code);
+
+            abort_unless($row, 404, 'Propiedad no encontrada en WordPress.');
+
+            return $this->localProperty($row);
+        }
+
+        return Property::where('code', $code)->firstOrFail();
+    }
+
+    protected function sourceRow(string $code): ?stdClass
+    {
+        if (config('sources.properties') !== 'wordpress') {
+            return null;
+        }
+
+        return DB::connection('wordpress')
+            ->table('wp_jet_cct_inmuebles')
+            ->where('cct_status', 'publish')
+            ->where('codigo', $code)
+            ->first();
     }
 
     public function mapProperty(Property $property, array $settings = [], ?stdClass $source = null): array

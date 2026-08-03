@@ -84,6 +84,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::patch('/fincaraiz/settings', [FincaraizController::class, 'saveSettings']);
         Route::get('/fincaraiz/client', [FincaraizController::class, 'clientInfo']);
         Route::get('/fincaraiz/listings', [FincaraizController::class, 'listings']);
+        Route::post('/fincaraiz/reconcile', [FincaraizController::class, 'reconcile']);
         Route::get('/fincaraiz/locations', [FincaraizController::class, 'locations']);
         Route::post('/fincaraiz/webhook/subscribe', [FincaraizController::class, 'subscribeWebhook']);
         Route::get('/automation', [PortalAutomationController::class, 'index']);

@@ -48,6 +48,20 @@ class WordPressPropertyRepository
         return $this->mapProperty($row, $this->attachmentUrls($rows), withDetail: true, syncStatuses: $this->syncStatuses($rows));
     }
 
+    public function activeCodes(): Collection
+    {
+        $query = $this->baseQuery();
+        $this->applyFilters($query, ['estado' => 'active']);
+
+        return $query
+            ->orderBy('codigo')
+            ->pluck('codigo')
+            ->map(fn ($code) => trim((string) $code))
+            ->filter()
+            ->unique()
+            ->values();
+    }
+
     public function statsByStatus(): Collection
     {
         return $this->baseQuery()

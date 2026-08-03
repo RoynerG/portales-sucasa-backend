@@ -70,4 +70,20 @@ class AutoSyncFincaraizTest extends TestCase
             'sync_status' => 'pending',
         ])));
     }
+
+    public function test_it_rotates_the_catalog_scan_until_every_property_is_reviewed(): void
+    {
+        $command = new class extends AutoSyncFincaraiz
+        {
+            public function exposedNextScanOffset(int $currentOffset, int $scanned, int $totalRows): int
+            {
+                return $this->nextScanOffset($currentOffset, $scanned, $totalRows);
+            }
+        };
+
+        $this->assertSame(500, $command->exposedNextScanOffset(0, 500, 916));
+        $this->assertSame(0, $command->exposedNextScanOffset(500, 416, 916));
+        $this->assertSame(25, $command->exposedNextScanOffset(5, 20, 916));
+        $this->assertSame(0, $command->exposedNextScanOffset(0, 0, 0));
+    }
 }

@@ -11,6 +11,7 @@ use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use stdClass;
@@ -161,10 +162,22 @@ class AutoSyncFincaraiz extends Command
             ->select(['codigo', 'estado', 'fecha_actualizacion', 'cct_modified'])
             ->where('cct_status', 'publish');
 
+        $rotationKey = 'fincaraiz.auto-sync-offset.'.config('portals.fincaraiz.environment');
+        $scanOffset = 0;
+        $totalRows = 0;
+
         if ($codes->isNotEmpty()) {
             $rowsQuery->whereIn('codigo', $codes->all());
         } else {
-            $rowsQuery->orderByDesc('cct_modified')->limit($scan);
+            $totalRows = (clone $rowsQuery)->count();
+            $scanOffset = $totalRows > 0
+                ? ((int) Cache::get($rotationKey, 0)) % $totalRows
+                : 0;
+
+            $rowsQuery
+                ->orderBy('codigo')
+                ->offset($scanOffset)
+                ->limit($scan);
         }
 
         $rows = $rowsQuery->get();
@@ -178,10 +191,14 @@ class AutoSyncFincaraiz extends Command
             ->get()
             ->keyBy('property_id');
 
+        $scanned = 0;
+
         foreach ($rows as $row) {
             if ($executed >= $limit) {
                 break;
             }
+
+            $scanned++;
 
             $code = trim((string) $row->codigo);
             $property = $properties->get($code);
@@ -209,7 +226,23 @@ class AutoSyncFincaraiz extends Command
             $executed++;
         }
 
+        if ($codes->isEmpty() && $totalRows > 0) {
+            $nextOffset = $this->nextScanOffset($scanOffset, $scanned, $totalRows);
+            if (! $dryRun) {
+                Cache::put($rotationKey, $nextOffset, now()->addDay());
+            }
+            $cursorMessage = $dryRun
+                ? 'simulación; cursor sin cambios'
+                : "próxima corrida desde {$nextOffset}";
+            $this->line("Escaneo: {$scanned} de {$totalRows} inmuebles; {$cursorMessage}.");
+        }
+
         return $executed;
+    }
+
+    protected function nextScanOffset(int $currentOffset, int $scanned, int $totalRows): int
+    {
+        return $totalRows > 0 ? ($currentOffset + $scanned) % $totalRows : 0;
     }
 
     protected function decision(stdClass $row, ?PropertySyncStatus $sync, bool $retryErrors = false): ?string

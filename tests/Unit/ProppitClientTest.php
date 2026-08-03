@@ -220,6 +220,21 @@ class ProppitClientTest extends TestCase
         $this->assertFalse($result['data']['publishingEnabled']);
     }
 
+    public function test_get_ads_verifies_multiple_known_references(): void
+    {
+        config()->set('portals.proppit.publisher_external_id', 'sucasa');
+        $client = $this->clientWith([
+            new Response(200, [], '{"referenceId":"100","status":"active"}'),
+            new Response(404, [], '{"error":"Ad not found"}'),
+        ]);
+
+        $results = $client->getAds(['100', '200'], 'token', 2);
+
+        $this->assertTrue($results['100']['ok']);
+        $this->assertFalse($results['200']['ok']);
+        $this->assertSame(404, $results['200']['status']);
+    }
+
     private function clientWith(array $responses): ProppitClient
     {
         $handler = new MockHandler($responses);

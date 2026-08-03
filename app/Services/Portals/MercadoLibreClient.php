@@ -134,6 +134,29 @@ class MercadoLibreClient
         return $this->request('GET', "/items/{$itemId}", $credential);
     }
 
+    public function sellerItems(
+        PortalCredential $credential,
+        string $status = 'active',
+        int $offset = 0,
+        int $limit = 50
+    ): array {
+        $userId = $credential->data['external_user_id'] ?? null;
+        if (! $userId) {
+            return $this->failure(422, ['message' => 'La credencial no contiene el usuario vendedor.']);
+        }
+
+        return $this->request(
+            'GET',
+            "/users/{$userId}/items/search",
+            $credential,
+            query: [
+                'status' => $status,
+                'offset' => max(0, $offset),
+                'limit' => min(50, max(1, $limit)),
+            ]
+        );
+    }
+
     public function createItem(array $payload, PortalCredential $credential): array
     {
         return $this->request('POST', '/items', $credential, $payload);

@@ -14,6 +14,7 @@ use App\Http\Controllers\Portal\FincaraizNeighborhoodController;
 use App\Http\Controllers\Portal\MercadoLibreController;
 use App\Http\Controllers\Portal\PortalAutomationController;
 use App\Http\Controllers\Portal\PortalBulkController;
+use App\Http\Controllers\Portal\PortalCatalogAuditController;
 use App\Http\Controllers\Portal\PortalErrorController;
 use App\Http\Controllers\Portal\PortalResetController;
 use App\Http\Controllers\Portal\ProppitController;
@@ -92,6 +93,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::patch('/fincaraiz/neighborhoods/{id}', [FincaraizNeighborhoodController::class, 'update']);
         Route::post('/fincaraiz/webhook/subscribe', [FincaraizController::class, 'subscribeWebhook']);
         Route::get('/automation', [PortalAutomationController::class, 'index']);
+        Route::get('/automation/catalog-audit', [PortalCatalogAuditController::class, 'index']);
+        Route::post('/automation/catalog-audit/{portal}', [PortalCatalogAuditController::class, 'verify']);
         Route::get('/errors', [PortalErrorController::class, 'index']);
         Route::get('/{portal}/bulk-candidates', [PortalBulkController::class, 'candidates']);
         Route::get('/properties/{code}/fincaraiz/payload', [FincaraizController::class, 'payload']);

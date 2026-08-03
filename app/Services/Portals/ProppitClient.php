@@ -5,7 +5,10 @@ namespace App\Services\Portals;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\RequestException;
+use GuzzleHttp\Pool;
 use Illuminate\Support\Facades\Log;
+use Psr\Http\Message\ResponseInterface;
+use Throwable;
 
 class ProppitClient
 {
@@ -46,6 +49,68 @@ class ProppitClient
             'query' => ['externalId' => config('portals.proppit.publisher_external_id')],
             'token' => $token,
         ]);
+    }
+
+    public function getAds(array $referenceIds, string $token, int $concurrency = 8): array
+    {
+        $referenceIds = collect($referenceIds)
+            ->map(fn ($referenceId) => trim((string) $referenceId))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+        $publisherId = config('portals.proppit.publisher_external_id');
+        $requests = function () use ($referenceIds, $token, $publisherId) {
+            foreach ($referenceIds as $referenceId) {
+                yield $referenceId => fn () => $this->http->requestAsync(
+                    'GET',
+                    rtrim(config('portals.proppit.api_url'), '/')
+                        .$this->countryPath('/ads/'.rawurlencode($referenceId)),
+                    [
+                        'headers' => [
+                            'Accept' => 'application/json',
+                            'Content-Type' => 'application/json',
+                            'Authorization' => 'Bearer '.$token,
+                        ],
+                        'query' => ['externalId' => $publisherId],
+                        'timeout' => 45,
+                    ]
+                );
+            }
+        };
+        $results = [];
+        $pool = new Pool($this->http, $requests(), [
+            'concurrency' => min(12, max(1, $concurrency)),
+            'fulfilled' => function (ResponseInterface $response, string $referenceId) use (&$results): void {
+                $body = (string) $response->getBody();
+                $results[$referenceId] = [
+                    'ok' => true,
+                    'status' => $response->getStatusCode(),
+                    'data' => $body !== '' ? json_decode($body, true) : ['ok' => true],
+                ];
+            },
+            'rejected' => function (Throwable $exception, string $referenceId) use (&$results): void {
+                $response = method_exists($exception, 'getResponse') ? $exception->getResponse() : null;
+                $body = $response ? (string) $response->getBody() : null;
+                $results[$referenceId] = [
+                    'ok' => false,
+                    'status' => $response?->getStatusCode(),
+                    'data' => [
+                        'error' => $exception->getMessage(),
+                        'body' => $body ? (json_decode($body, true) ?? $body) : null,
+                    ],
+                ];
+            },
+        ]);
+        $pool->promise()->wait();
+
+        return collect($referenceIds)
+            ->mapWithKeys(fn (string $referenceId) => [$referenceId => $results[$referenceId] ?? [
+                'ok' => false,
+                'status' => 502,
+                'data' => ['error' => 'La consulta no devolvió respuesta.'],
+            ]])
+            ->all();
     }
 
     public function deleteAd(string $referenceId, string $token): array

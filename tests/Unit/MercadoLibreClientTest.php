@@ -70,6 +70,23 @@ class MercadoLibreClientTest extends TestCase
         $this->assertSame(17, $result['retry_after']);
     }
 
+    public function test_seller_items_returns_the_active_inventory_page(): void
+    {
+        [$client] = $this->clientWith([
+            new Response(200, [], '{"paging":{"total":2},"results":["MCO1","MCO2"]}'),
+        ]);
+        $credential = new PortalCredential([
+            'access_token' => 'access-token',
+            'access_token_expires_at' => now()->addHour(),
+            'data' => ['external_user_id' => 987],
+        ]);
+
+        $result = $client->sellerItems($credential, 'active');
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame(['MCO1', 'MCO2'], $result['data']['results']);
+    }
+
     public function test_a_401_rotates_the_refresh_token_and_retries_once(): void
     {
         $this->createCredentialTables();

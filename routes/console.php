@@ -14,7 +14,8 @@ Schedule::command('ciencuadras:verify-pending --limit=25')
 
 Schedule::command('fincaraiz:auto-sync')
     ->everyFiveMinutes()
-    ->withoutOverlapping();
+    ->name('fincaraiz-auto-sync-v2')
+    ->withoutOverlapping(10);
 
 Schedule::command('ciencuadras:reconcile-active --grace=30')
     ->everyTenMinutes()

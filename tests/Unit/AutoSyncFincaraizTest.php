@@ -86,4 +86,21 @@ class AutoSyncFincaraizTest extends TestCase
         $this->assertSame(25, $command->exposedNextScanOffset(5, 20, 916));
         $this->assertSame(0, $command->exposedNextScanOffset(0, 0, 0));
     }
+
+    public function test_it_claims_each_catalog_code_only_once_per_cycle(): void
+    {
+        $command = new class extends AutoSyncFincaraiz
+        {
+            public function exposedClaimCatalogCode(string $code, array &$seenCodes): bool
+            {
+                return $this->claimCatalogCode($code, $seenCodes);
+            }
+        };
+        $seenCodes = [];
+
+        $this->assertTrue($command->exposedClaimCatalogCode('100985', $seenCodes));
+        $this->assertFalse($command->exposedClaimCatalogCode('100985', $seenCodes));
+        $this->assertFalse($command->exposedClaimCatalogCode('', $seenCodes));
+        $this->assertSame(['100985' => true], $seenCodes);
+    }
 }

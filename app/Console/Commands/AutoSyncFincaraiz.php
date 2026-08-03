@@ -176,6 +176,7 @@ class AutoSyncFincaraiz extends Command
 
             $rowsQuery
                 ->orderBy('codigo')
+                ->orderByDesc('cct_modified')
                 ->offset($scanOffset)
                 ->limit($scan);
         }
@@ -192,6 +193,7 @@ class AutoSyncFincaraiz extends Command
             ->keyBy('property_id');
 
         $scanned = 0;
+        $seenCodes = [];
 
         foreach ($rows as $row) {
             if ($executed >= $limit) {
@@ -201,6 +203,11 @@ class AutoSyncFincaraiz extends Command
             $scanned++;
 
             $code = trim((string) $row->codigo);
+            if (! $this->claimCatalogCode($code, $seenCodes)) {
+                $summary['skipped']++;
+
+                continue;
+            }
             $property = $properties->get($code);
             $sync = $property ? $syncs->get($property->id) : null;
             $action = $this->decision($row, $sync, (bool) $this->option('retry-errors'));
@@ -243,6 +250,17 @@ class AutoSyncFincaraiz extends Command
     protected function nextScanOffset(int $currentOffset, int $scanned, int $totalRows): int
     {
         return $totalRows > 0 ? ($currentOffset + $scanned) % $totalRows : 0;
+    }
+
+    protected function claimCatalogCode(string $code, array &$seenCodes): bool
+    {
+        if ($code === '' || isset($seenCodes[$code])) {
+            return false;
+        }
+
+        $seenCodes[$code] = true;
+
+        return true;
     }
 
     protected function decision(stdClass $row, ?PropertySyncStatus $sync, bool $retryErrors = false): ?string

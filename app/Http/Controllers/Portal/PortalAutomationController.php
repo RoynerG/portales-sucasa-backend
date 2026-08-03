@@ -171,20 +171,35 @@ class PortalAutomationController extends Controller
     protected function summaryPayload($items, string $portal): array
     {
         $items = collect($items);
-        $localSynced = $items->where('sync_status', 'synced')->count();
+        $localSyncedItems = $items->where('sync_status', 'synced');
+        $localSyncedCodes = $localSyncedItems
+            ->pluck('property.code')
+            ->filter()
+            ->unique()
+            ->values();
+        $localSynced = $localSyncedCodes->count();
         $synced = $localSynced;
         $portalActive = null;
+        $unconfirmed = 0;
 
         if ($portal === '' || $portal === 'all' || $portal === 'ciencuadras') {
             $activeCodes = $this->ciencuadrasActiveProperties->sourceCodes();
 
             if ($activeCodes !== null) {
                 $portalActive = $activeCodes->count();
-                $otherPortalSynced = $items
-                    ->where('sync_status', 'synced')
+                $ciencuadrasLocalCodes = $localSyncedItems
+                    ->where('portal', 'ciencuadras')
+                    ->pluck('property.code')
+                    ->filter()
+                    ->unique();
+                $otherPortalCodes = $localSyncedItems
                     ->where('portal', '!=', 'ciencuadras')
-                    ->count();
-                $synced = $portalActive + $otherPortalSynced;
+                    ->pluck('property.code')
+                    ->filter();
+                $synced = $portal === 'ciencuadras'
+                    ? $portalActive
+                    : $activeCodes->merge($otherPortalCodes)->unique()->count();
+                $unconfirmed = $ciencuadrasLocalCodes->diff($activeCodes)->count();
             }
         }
 
@@ -194,8 +209,8 @@ class PortalAutomationController extends Controller
             'synced' => $synced,
             'synced_local' => $localSynced,
             'portal_active' => $portalActive,
-            'unconfirmed' => $portalActive === null ? 0 : max(0, $localSynced - $synced),
-            'not_synced' => $items->where('sync_status', 'not_synced')->count(),
+            'unconfirmed' => $unconfirmed,
+            'not_synced' => $items->where('sync_status', 'not_synced')->pluck('property.code')->filter()->unique()->count(),
             'paused' => $items->where('sync_status', 'paused')->count(),
             'error' => $items->where('sync_status', 'error')->count(),
             'publish' => $items->where('action', 'publish')->count(),

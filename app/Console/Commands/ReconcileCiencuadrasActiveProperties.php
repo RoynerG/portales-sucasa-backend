@@ -25,15 +25,16 @@ class ReconcileCiencuadrasActiveProperties extends Command
             return self::SUCCESS;
         }
 
-        $portalCodes = $activeProperties->cleanCodes(fresh: true);
+        $portalCodes = $activeProperties->codes(fresh: true);
         if ($portalCodes === null) {
             $this->error('No fue posible consultar los inmuebles activos de Ciencuadras.');
             return self::FAILURE;
         }
         $activeBySourceCode = $portalCodes
-            ->mapWithKeys(fn (string $portalCode) => [
-                $activeProperties->sourceCode($portalCode) => $portalCode,
-            ]);
+            ->groupBy(fn (string $portalCode) => $activeProperties->sourceCode($portalCode))
+            ->map(fn ($codes) => $codes->first(
+                fn (string $portalCode) => ! $activeProperties->isLegacyCode($portalCode)
+            ) ?: $codes->first());
 
         $statuses = PropertySyncStatus::query()
             ->with('property')
@@ -93,9 +94,7 @@ class ReconcileCiencuadrasActiveProperties extends Command
                 $summary['paused']++;
             }
 
-            $cleanExternalId = (string) config('portals.ciencuadras.property_code_prefix', '22130-') . $code;
-
-            if ($status->sync_status === $nextStatus && (! $portalCode || $status->external_id === $cleanExternalId)) {
+            if ($status->sync_status === $nextStatus && (! $portalCode || $status->external_id === $portalCode)) {
                 $summary['unchanged']++;
                 continue;
             }
@@ -108,7 +107,7 @@ class ReconcileCiencuadrasActiveProperties extends Command
 
             $status->fill([
                 'sync_status' => $nextStatus,
-                'external_id' => $portalCode ? $cleanExternalId : $status->external_id,
+                'external_id' => $portalCode ?: $status->external_id,
                 'external_url' => $nextStatus === 'synced' ? $status->external_url : null,
                 'last_response' => [
                     'target_action' => 'reconcile',

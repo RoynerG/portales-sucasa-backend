@@ -120,7 +120,6 @@ class CiencuadrasActiveProperties
 
             return collect($result['data']['message'] ?? [])
                 ->filter(fn ($property) => is_array($property) && ! empty($property['propertyCode']))
-                ->reject(fn (array $property) => $this->isLegacyCode((string) $property['propertyCode']))
                 ->values();
         });
     }
@@ -250,7 +249,7 @@ class CiencuadrasActiveProperties
 
     public function sourceCodes(bool $fresh = false): ?Collection
     {
-        return $this->cleanCodes($fresh)
+        return $this->codes($fresh)
             ?->map(fn (string $code) => $this->sourceCode($code))
             ->filter()
             ->unique()

@@ -33,7 +33,7 @@ class CiencuadrasActivePropertiesTest extends TestCase
         ];
     }
 
-    public function test_cached_inventory_excludes_old_p_codes(): void
+    public function test_inventory_keeps_portal_codes_and_deduplicates_their_source_code(): void
     {
         $client = Mockery::mock(CiencuadrasClient::class);
         $client->shouldReceive('login')->once()->andReturn(['ok' => true, 'data' => ['token' => 'test']]);
@@ -50,6 +50,7 @@ class CiencuadrasActivePropertiesTest extends TestCase
 
         $service = new CiencuadrasActiveProperties($client);
 
-        $this->assertSame(['101247'], $service->sourceCodes(fresh: true)?->all());
+        $this->assertSame(['22130-P101247', '22130-101247'], $service->codes(fresh: true)?->all());
+        $this->assertSame(['101247'], $service->sourceCodes()?->all());
     }
 }

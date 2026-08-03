@@ -235,7 +235,10 @@ class FincaraizController extends Controller
                 'user_id' => $request->user()->id,
                 'environment' => (string) config('portals.fincaraiz.environment', 'qa'),
                 'client_id' => trim((string) $settings['client_id']),
-                'items' => collect($result['items'] ?? [])->where('state', 'ready')->values()->all(),
+                'items' => collect($result['items'] ?? [])
+                    ->whereIn('state', ['ready', 'ready_to_link'])
+                    ->values()
+                    ->all(),
             ], $expiresAt);
             $result['preview_token'] = $token;
             $result['preview_expires_at'] = $expiresAt->toIso8601String();

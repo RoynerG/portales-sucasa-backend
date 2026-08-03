@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Services\Portals\FincaraizClient;
+use App\Services\Portals\FincaraizListingReconciler;
 use App\Services\Portals\FincaraizListingRetirer;
 use App\Services\WordPressPropertyRepository;
 use Illuminate\Support\Collection;
@@ -44,9 +45,10 @@ class FincaraizListingRetirerTest extends TestCase
 
         $this->assertTrue($result['ok']);
         $this->assertSame(1, $result['ready']);
+        $this->assertSame(1, $result['linkable']);
         $this->assertSame(1, $result['protected']);
         $this->assertSame(1, $result['review']);
-        $this->assertSame('protected_public', $result['items'][0]['state']);
+        $this->assertSame('ready_to_link', $result['items'][0]['state']);
         $this->assertSame('ready', $result['items'][1]['state']);
         $this->assertSame('not_active', $result['items'][2]['state']);
     }
@@ -71,8 +73,17 @@ class FincaraizListingRetirerTest extends TestCase
             ]);
         $wordpress = $this->createMock(WordPressPropertyRepository::class);
         $wordpress->method('activeCodes')->willReturn(new Collection(['200']));
+        $reconciler = $this->createMock(FincaraizListingReconciler::class);
+        $reconciler->expects($this->once())->method('applyPreview')->willReturn([
+            'items' => [[
+                'code' => '200',
+                'fr_property_id' => '9002',
+                'listing_id' => '22222222-2222-4222-8222-222222222222',
+                'state' => 'linked',
+            ]],
+        ]);
 
-        $result = (new FincaraizListingRetirer($client, $wordpress))->apply([
+        $result = (new FincaraizListingRetirer($client, $wordpress, $reconciler))->apply([
             'api_key' => 'secret',
             'client_id' => 'client',
         ], [
@@ -80,7 +91,7 @@ class FincaraizListingRetirerTest extends TestCase
                 'code' => '200',
                 'fr_property_id' => '9002',
                 'listing_id' => '22222222-2222-4222-8222-222222222222',
-                'state' => 'ready',
+                'state' => 'ready_to_link',
             ],
             [
                 'code' => '300',
@@ -91,9 +102,10 @@ class FincaraizListingRetirerTest extends TestCase
         ]);
 
         $this->assertSame(1, $result['queued']);
+        $this->assertSame(1, $result['linked']);
         $this->assertSame(1, $result['protected']);
         $this->assertSame(0, $result['errors']);
-        $this->assertSame('protected_public', $result['items'][0]['state']);
+        $this->assertSame('linked', $result['items'][0]['state']);
         $this->assertSame('queued', $result['items'][1]['state']);
         $this->assertSame('task-300', $result['items'][1]['task_id']);
     }

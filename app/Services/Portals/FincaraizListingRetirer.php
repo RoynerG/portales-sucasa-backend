@@ -10,7 +10,8 @@ class FincaraizListingRetirer
 {
     public function __construct(
         protected FincaraizClient $client,
-        protected WordPressPropertyRepository $wordpress
+        protected WordPressPropertyRepository $wordpress,
+        protected ?FincaraizListingReconciler $reconciler = null
     ) {}
 
     public function preview(array $settings, array $exportedListings): array
@@ -41,40 +42,40 @@ class FincaraizListingRetirer
             fn (array $listing) => trim((string) ($listing['frPropertyId'] ?? ''))
         );
         $items = $rows->map(function (array $row) use ($activeCodes, $byPropertyId) {
-            if ($activeCodes->contains($row['code'])) {
-                return $row + [
-                    'state' => 'protected_public',
-                    'message' => 'Sigue público en el catálogo local.',
-                ];
-            }
-
+            $isPublic = $activeCodes->contains($row['code']);
             $matches = $byPropertyId->get($row['fr_property_id'], collect());
             if ($matches->isEmpty()) {
                 return $row + [
-                    'state' => 'not_active',
-                    'message' => 'No se encontró activo actualmente en Fincaraíz.',
+                    'state' => $isPublic ? 'protected_unlinked' : 'not_active',
+                    'message' => $isPublic
+                        ? 'Sigue público localmente, pero no se encontró activo en Fincaraíz para enlazarlo.'
+                        : 'No se encontró activo actualmente en Fincaraíz.',
                 ];
             }
             if ($matches->count() !== 1) {
                 return $row + [
-                    'state' => 'ambiguous',
+                    'state' => $isPublic ? 'protected_unlinked' : 'ambiguous',
                     'matches' => $matches->count(),
-                    'message' => 'El código de Fincaraíz devolvió más de un aviso activo.',
+                    'message' => $isPublic
+                        ? 'Sigue público localmente, pero hay varias coincidencias activas y no se enlazará automáticamente.'
+                        : 'El código de Fincaraíz devolvió más de un aviso activo.',
                 ];
             }
 
             $listingId = trim((string) ($matches->first()['id'] ?? ''));
             if (! Str::isUuid($listingId)) {
                 return $row + [
-                    'state' => 'invalid_listing_id',
+                    'state' => $isPublic ? 'protected_unlinked' : 'invalid_listing_id',
                     'message' => 'Fincaraíz no devolvió un listing_id UUID válido.',
                 ];
             }
 
             return $row + [
-                'state' => 'ready',
+                'state' => $isPublic ? 'ready_to_link' : 'ready',
                 'listing_id' => $listingId,
-                'message' => 'Listo para desactivar.',
+                'message' => $isPublic
+                    ? 'Sigue público y su referencia local está lista para guardar.'
+                    : 'Listo para desactivar.',
             ];
         })->values();
 
@@ -86,8 +87,9 @@ class FincaraizListingRetirer
             'valid_rows' => $rows->count(),
             'active_remote' => count($remote['listings']),
             'ready' => $items->where('state', 'ready')->count(),
-            'protected' => $items->where('state', 'protected_public')->count(),
-            'review' => $items->whereNotIn('state', ['ready', 'protected_public'])->count(),
+            'linkable' => $items->where('state', 'ready_to_link')->count(),
+            'protected' => $items->whereIn('state', ['ready_to_link', 'protected_unlinked'])->count(),
+            'review' => $items->whereNotIn('state', ['ready', 'ready_to_link'])->count(),
             'items' => $items->all(),
         ];
     }
@@ -99,15 +101,18 @@ class FincaraizListingRetirer
         $activeCodes = $this->activeCodes();
         $items = collect($previewItems)
             ->filter(fn ($item) => is_array($item)
-                && ($item['state'] ?? null) === 'ready'
+                && in_array(($item['state'] ?? null), ['ready', 'ready_to_link'], true)
                 && trim((string) ($item['code'] ?? '')) !== ''
                 && trim((string) ($item['fr_property_id'] ?? '')) !== ''
                 && Str::isUuid(trim((string) ($item['listing_id'] ?? ''))))
             ->unique('listing_id')
             ->values();
 
-        $protected = $items->filter(fn (array $item) => $activeCodes->contains(trim((string) $item['code'])));
-        $ready = $items->reject(fn (array $item) => $activeCodes->contains(trim((string) $item['code'])))->values();
+        $linkable = $items->filter(fn (array $item) => $activeCodes->contains(trim((string) $item['code'])))->values();
+        $ready = $items->filter(fn (array $item) => ! $activeCodes->contains(trim((string) $item['code']))
+            && ($item['state'] ?? null) === 'ready')->values();
+        $catalogChanged = $items->filter(fn (array $item) => ! $activeCodes->contains(trim((string) $item['code']))
+            && ($item['state'] ?? null) === 'ready_to_link')->values();
         $responses = $this->client->changeStatusesMany(
             $ready->pluck('listing_id')->all(),
             'DISABLED',
@@ -115,11 +120,23 @@ class FincaraizListingRetirer
             $apiKey,
             (int) config('portals.fincaraiz.retire_concurrency', 4)
         );
+        $reconciler = $this->reconciler ?? app(FincaraizListingReconciler::class);
+        $linkResult = $reconciler->applyPreview($linkable->map(
+            fn (array $item) => array_replace($item, ['state' => 'ready'])
+        )->all());
+        $linkedByCode = collect($linkResult['items'] ?? [])->keyBy('code');
 
-        $results = $protected->map(fn (array $item) => array_replace($item, [
-            'state' => 'protected_public',
-            'message' => 'Se protegió porque volvió a estar público en el catálogo local.',
-        ]))->concat($ready->map(function (array $item) use ($responses) {
+        $results = $linkable->map(function (array $item) use ($linkedByCode) {
+            $linked = $linkedByCode->get(trim((string) $item['code']));
+
+            return array_replace($item, is_array($linked) ? $linked : [
+                'state' => 'local_error',
+                'message' => 'No fue posible guardar la referencia local.',
+            ]);
+        })->concat($catalogChanged->map(fn (array $item) => array_replace($item, [
+            'state' => 'catalog_changed',
+            'message' => 'Ya no está público localmente; se omitió porque cambió después de la vista previa.',
+        ])))->concat($ready->map(function (array $item) use ($responses) {
             $result = $responses[$item['listing_id']] ?? ['ok' => false, 'data' => []];
             $ok = (bool) ($result['ok'] ?? false);
 
@@ -136,19 +153,22 @@ class FincaraizListingRetirer
             'environment' => (string) config('portals.fincaraiz.environment', 'qa'),
             'requested' => $items->count(),
             'queued' => $results->where('state', 'queued')->count(),
-            'protected' => $results->where('state', 'protected_public')->count(),
-            'errors' => $results->where('state', 'api_error')->count(),
+            'linked' => $results->where('state', 'linked')->count(),
+            'protected' => $linkable->count(),
+            'errors' => $results->whereIn('state', ['api_error', 'local_error'])->count(),
             'listing_ids' => $results->where('state', 'queued')->pluck('listing_id')->all(),
         ]);
 
         return [
-            'ok' => $results->where('state', 'api_error')->isEmpty(),
+            'ok' => $results->whereIn('state', ['api_error', 'local_error'])->isEmpty(),
             'dry_run' => false,
             'environment' => (string) config('portals.fincaraiz.environment', 'qa'),
             'requested' => $items->count(),
             'queued' => $results->where('state', 'queued')->count(),
-            'protected' => $results->where('state', 'protected_public')->count(),
-            'errors' => $results->where('state', 'api_error')->count(),
+            'linked' => $results->where('state', 'linked')->count(),
+            'protected' => $linkable->count(),
+            'catalog_changed' => $results->where('state', 'catalog_changed')->count(),
+            'errors' => $results->whereIn('state', ['api_error', 'local_error'])->count(),
             'items' => $results->all(),
         ];
     }

@@ -103,7 +103,9 @@ class PortalCatalogAuditService
             if (! ($response['ok'] ?? false)) {
                 throw new RuntimeException((string) (data_get($response, 'data.error') ?: 'Fincaraíz rechazó la consulta.'));
             }
-            $pageRows = collect(data_get($response, 'data.results', []))->filter('is_array')->values();
+            $pageRows = collect(data_get($response, 'data.results', []))
+                ->filter(fn ($listing) => is_array($listing))
+                ->values();
             $rows = $rows->concat($pageRows);
             $total = (int) data_get($response, 'data.count', $rows->count());
             if ($pageRows->isEmpty() || $rows->count() >= $total || ! data_get($response, 'data.next')) {

@@ -9,6 +9,7 @@ use App\Services\Portals\FincaraizClient;
 use App\Services\Portals\MercadoLibreClient;
 use App\Services\Portals\ProppitClient;
 use App\Services\WordPressPropertyRepository;
+use Illuminate\Support\Collection;
 use Mockery;
 use ReflectionMethod;
 use Tests\TestCase;
@@ -42,5 +43,47 @@ class PortalCatalogAuditServiceTest extends TestCase
         $this->assertSame(['300'], $result['details']['missing']);
         $this->assertSame(['999'], $result['details']['extra']);
         $this->assertSame(['300', '400'], $result['details']['inactive']);
+    }
+
+    public function test_fincaraiz_audit_filters_non_array_rows_without_breaking_pagination(): void
+    {
+        config()->set('portals.fincaraiz.api_key', 'test-key');
+        config()->set('portals.fincaraiz.client_id', 'test-client');
+        config()->set('portals.fincaraiz.environment', 'production');
+
+        $fincaraiz = Mockery::mock(FincaraizClient::class);
+        $fincaraiz->shouldReceive('listListings')
+            ->once()
+            ->with('test-key', 'test-client', 1, 100)
+            ->andReturn([
+                'ok' => true,
+                'data' => [
+                    'results' => [
+                        ['id' => 'listing-1', 'status' => 4, 'external_code' => '100'],
+                        null,
+                        'invalid-row',
+                        ['id' => 'listing-2', 'status' => 2, 'external_code' => '200'],
+                    ],
+                    'count' => 4,
+                    'next' => null,
+                ],
+            ]);
+
+        $service = new class(Mockery::mock(WordPressPropertyRepository::class), Mockery::mock(CiencuadrasActiveProperties::class), $fincaraiz, Mockery::mock(MercadoLibreClient::class), Mockery::mock(ProppitClient::class)) extends PortalCatalogAuditService
+        {
+            protected function registryReferences(Integration $integration, ?string $environment): Collection
+            {
+                return collect();
+            }
+        };
+
+        $integration = new Integration(['name' => 'Fincaraíz', 'slug' => 'fincaraiz', 'icon' => 'fa-house']);
+        $method = new ReflectionMethod($service, 'auditFincaraiz');
+        $result = $method->invoke($service, $integration, collect(['100']), null);
+
+        $this->assertSame('coordinated', $result['status']);
+        $this->assertSame(1, $result['remote_active']);
+        $this->assertSame(1, $result['matched']);
+        $this->assertSame([], $result['details']['unknown_remote']);
     }
 }

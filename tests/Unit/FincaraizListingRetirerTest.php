@@ -109,4 +109,80 @@ class FincaraizListingRetirerTest extends TestCase
         $this->assertSame('queued', $result['items'][1]['state']);
         $this->assertSame('task-300', $result['items'][1]['task_id']);
     }
+
+    public function test_preview_counts_active_listing_ids_inside_ambiguous_review_rows(): void
+    {
+        $client = $this->createMock(FincaraizClient::class);
+        $client->expects($this->once())->method('listListings')->willReturn([
+            'ok' => true,
+            'data' => [
+                'results' => [
+                    ['id' => '11111111-1111-4111-8111-111111111111', 'frPropertyId' => '9001', 'status' => 4],
+                    ['id' => '22222222-2222-4222-8222-222222222222', 'frPropertyId' => '9001', 'status' => 4],
+                ],
+                'next' => null,
+            ],
+        ]);
+        $wordpress = $this->createMock(WordPressPropertyRepository::class);
+        $wordpress->method('activeCodes')->willReturn(new Collection(['100']));
+
+        $result = (new FincaraizListingRetirer($client, $wordpress))->preview([
+            'api_key' => 'secret',
+            'client_id' => 'client',
+        ], [
+            ['code' => '100', 'fr_property_id' => '9001'],
+            ['code' => '200', 'fr_property_id' => '9002'],
+        ]);
+
+        $this->assertSame(2, $result['review']);
+        $this->assertSame(1, $result['removable_codes']);
+        $this->assertSame(2, $result['removable_listings']);
+        $this->assertSame('protected_unlinked', $result['items'][0]['state']);
+        $this->assertCount(2, $result['items'][0]['listing_ids']);
+        $this->assertSame([], $result['items'][1]['listing_ids']);
+    }
+
+    public function test_apply_unresolved_disables_each_unique_active_uuid(): void
+    {
+        $client = $this->createMock(FincaraizClient::class);
+        $client->expects($this->once())
+            ->method('changeStatusesMany')
+            ->with(
+                [
+                    '11111111-1111-4111-8111-111111111111',
+                    '22222222-2222-4222-8222-222222222222',
+                ],
+                'DISABLED',
+                'client',
+                'secret',
+                4
+            )
+            ->willReturn([
+                '11111111-1111-4111-8111-111111111111' => ['ok' => true, 'data' => ['task' => ['id' => 'task-1']]],
+                '22222222-2222-4222-8222-222222222222' => ['ok' => true, 'data' => ['task' => ['id' => 'task-2']]],
+            ]);
+        $wordpress = $this->createMock(WordPressPropertyRepository::class);
+
+        $result = (new FincaraizListingRetirer($client, $wordpress))->applyUnresolved([
+            'api_key' => 'secret',
+            'client_id' => 'client',
+        ], [
+            [
+                'code' => '100',
+                'fr_property_id' => '9001',
+                'state' => 'protected_unlinked',
+                'listing_ids' => [
+                    '11111111-1111-4111-8111-111111111111',
+                    '22222222-2222-4222-8222-222222222222',
+                ],
+            ],
+        ]);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('unresolved', $result['mode']);
+        $this->assertSame(1, $result['requested_codes']);
+        $this->assertSame(2, $result['requested_listings']);
+        $this->assertSame(2, $result['queued']);
+        $this->assertSame(0, $result['errors']);
+    }
 }

@@ -213,6 +213,7 @@ class FincaraizController extends Controller
             'dry_run' => ['sometimes', 'boolean'],
             'confirmed' => ['required_if:dry_run,false', 'boolean'],
             'preview_token' => ['required_if:dry_run,false', 'nullable', 'uuid'],
+            'mode' => ['sometimes', 'in:standard,unresolved'],
             'listings' => ['required_if:dry_run,true', 'array', 'max:1000'],
             'listings.*.code' => ['required_with:listings', 'string', 'max:120'],
             'listings.*.fr_property_id' => ['required_with:listings', 'string', 'max:120'],
@@ -236,7 +237,8 @@ class FincaraizController extends Controller
                 'environment' => (string) config('portals.fincaraiz.environment', 'qa'),
                 'client_id' => trim((string) $settings['client_id']),
                 'items' => collect($result['items'] ?? [])
-                    ->whereIn('state', ['ready', 'ready_to_link'])
+                    ->filter(fn (array $item) => in_array(($item['state'] ?? null), ['ready', 'ready_to_link'], true)
+                        || ! empty($item['listing_ids']))
                     ->values()
                     ->all(),
             ], $expiresAt);
@@ -259,7 +261,11 @@ class FincaraizController extends Controller
             'La configuración de Fincaraíz cambió. Carga nuevamente el archivo.'
         );
 
-        return response()->json(['Datos' => $retirer->apply($settings, $preview['items'] ?? [])]);
+        $mode = (string) ($data['mode'] ?? 'standard');
+
+        return response()->json(['Datos' => $mode === 'unresolved'
+            ? $retirer->applyUnresolved($settings, $preview['items'] ?? [])
+            : $retirer->apply($settings, $preview['items'] ?? [])]);
     }
 
     protected function retirePreviewKey(string $token): string

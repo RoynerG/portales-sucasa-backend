@@ -47,18 +47,28 @@ class FincaraizListingRetirer
             if ($matches->isEmpty()) {
                 return $row + [
                     'state' => $isPublic ? 'protected_unlinked' : 'not_active',
+                    'listing_ids' => [],
                     'message' => $isPublic
                         ? 'Sigue público localmente, pero no se encontró activo en Fincaraíz para enlazarlo.'
                         : 'No se encontró activo actualmente en Fincaraíz.',
                 ];
             }
             if ($matches->count() !== 1) {
+                $listingIds = $matches
+                    ->pluck('id')
+                    ->map(fn ($id) => trim((string) $id))
+                    ->filter(fn (string $id) => Str::isUuid($id))
+                    ->unique()
+                    ->values();
+                $allListingIdsAreValid = $listingIds->count() === $matches->count();
+
                 return $row + [
                     'state' => $isPublic ? 'protected_unlinked' : 'ambiguous',
                     'matches' => $matches->count(),
+                    'listing_ids' => $allListingIdsAreValid ? $listingIds->all() : [],
                     'message' => $isPublic
-                        ? 'Sigue público localmente, pero hay varias coincidencias activas y no se enlazará automáticamente.'
-                        : 'El código de Fincaraíz devolvió más de un aviso activo.',
+                        ? 'Sigue público localmente y tiene varias coincidencias activas. Puede retirarlas manualmente desde esta vista previa.'
+                        : 'El código de Fincaraíz devolvió más de un aviso activo. Puede retirarlos manualmente desde esta vista previa.',
                 ];
             }
 
@@ -66,6 +76,7 @@ class FincaraizListingRetirer
             if (! Str::isUuid($listingId)) {
                 return $row + [
                     'state' => $isPublic ? 'protected_unlinked' : 'invalid_listing_id',
+                    'listing_ids' => [],
                     'message' => 'Fincaraíz no devolvió un listing_id UUID válido.',
                 ];
             }
@@ -78,6 +89,14 @@ class FincaraizListingRetirer
                     : 'Listo para desactivar.',
             ];
         })->values();
+        $reviewItems = $items->whereNotIn('state', ['ready', 'ready_to_link']);
+        $removableItems = $reviewItems->filter(
+            fn (array $item) => ! empty($item['listing_ids'])
+        );
+        $removableListingIds = $removableItems
+            ->flatMap(fn (array $item) => $item['listing_ids'])
+            ->unique()
+            ->values();
 
         return [
             'ok' => true,
@@ -89,7 +108,9 @@ class FincaraizListingRetirer
             'ready' => $items->where('state', 'ready')->count(),
             'linkable' => $items->where('state', 'ready_to_link')->count(),
             'protected' => $items->whereIn('state', ['ready_to_link', 'protected_unlinked'])->count(),
-            'review' => $items->whereNotIn('state', ['ready', 'ready_to_link'])->count(),
+            'review' => $reviewItems->count(),
+            'removable_codes' => $removableItems->count(),
+            'removable_listings' => $removableListingIds->count(),
             'items' => $items->all(),
         ];
     }
@@ -169,6 +190,70 @@ class FincaraizListingRetirer
             'protected' => $linkable->count(),
             'catalog_changed' => $results->where('state', 'catalog_changed')->count(),
             'errors' => $results->whereIn('state', ['api_error', 'local_error'])->count(),
+            'items' => $results->all(),
+        ];
+    }
+
+    public function applyUnresolved(array $settings, array $previewItems): array
+    {
+        $apiKey = trim((string) ($settings['api_key'] ?? ''));
+        $clientId = trim((string) ($settings['client_id'] ?? ''));
+        $items = collect($previewItems)
+            ->filter(fn ($item) => is_array($item)
+                && in_array(($item['state'] ?? null), ['ambiguous', 'protected_unlinked'], true)
+                && trim((string) ($item['code'] ?? '')) !== ''
+                && trim((string) ($item['fr_property_id'] ?? '')) !== ''
+                && is_array($item['listing_ids'] ?? null)
+                && ! empty($item['listing_ids']))
+            ->values();
+        $targets = $items->flatMap(function (array $item) {
+            return collect($item['listing_ids'])
+                ->map(fn ($listingId) => trim((string) $listingId))
+                ->filter(fn (string $listingId) => Str::isUuid($listingId))
+                ->map(fn (string $listingId) => [
+                    'code' => trim((string) $item['code']),
+                    'fr_property_id' => trim((string) $item['fr_property_id']),
+                    'listing_id' => $listingId,
+                ]);
+        })->unique('listing_id')->values();
+        $responses = $this->client->changeStatusesMany(
+            $targets->pluck('listing_id')->all(),
+            'DISABLED',
+            $clientId,
+            $apiKey,
+            (int) config('portals.fincaraiz.retire_concurrency', 4)
+        );
+        $results = $targets->map(function (array $item) use ($responses) {
+            $result = $responses[$item['listing_id']] ?? ['ok' => false, 'data' => []];
+            $ok = (bool) ($result['ok'] ?? false);
+
+            return $item + [
+                'state' => $ok ? 'queued' : 'api_error',
+                'task_id' => data_get($result, 'data.task.id'),
+                'message' => $ok
+                    ? 'Desactivación manual enviada a Fincaraíz.'
+                    : (data_get($result, 'data.detail') ?: data_get($result, 'data.error') ?: 'Fincaraíz rechazó la desactivación.'),
+            ];
+        })->values();
+
+        Log::notice('Desactivación manual de avisos Fincaraíz sin enlace único', [
+            'environment' => (string) config('portals.fincaraiz.environment', 'qa'),
+            'requested_codes' => $items->count(),
+            'requested_listings' => $targets->count(),
+            'queued' => $results->where('state', 'queued')->count(),
+            'errors' => $results->where('state', 'api_error')->count(),
+            'listing_ids' => $results->where('state', 'queued')->pluck('listing_id')->all(),
+        ]);
+
+        return [
+            'ok' => $results->where('state', 'api_error')->isEmpty(),
+            'dry_run' => false,
+            'mode' => 'unresolved',
+            'environment' => (string) config('portals.fincaraiz.environment', 'qa'),
+            'requested_codes' => $items->count(),
+            'requested_listings' => $targets->count(),
+            'queued' => $results->where('state', 'queued')->count(),
+            'errors' => $results->where('state', 'api_error')->count(),
             'items' => $results->all(),
         ];
     }

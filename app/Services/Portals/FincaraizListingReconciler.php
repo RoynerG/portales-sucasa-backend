@@ -18,15 +18,19 @@ class FincaraizListingReconciler
         protected WordPressPropertyRepository $wordpress
     ) {}
 
-    public function reconcile(array $settings, int $limit = 10, bool $dryRun = true): array
+    public function reconcile(array $settings, int $limit = 10, bool $dryRun = true, int $offset = 0): array
     {
         $apiKey = trim((string) ($settings['api_key'] ?? ''));
         $clientId = trim((string) ($settings['client_id'] ?? ''));
         $environment = (string) config('portals.fincaraiz.environment', 'qa');
         $integration = Integration::where('slug', 'fincaraiz')->firstOrFail();
         $limit = min(25, max(1, $limit));
+        $offset = max(0, $offset);
 
-        $codes = $this->candidateCodes($integration->id, $environment)->take($limit)->values();
+        $codes = $this->candidateCodes($integration->id, $environment)
+            ->skip($offset)
+            ->take($limit)
+            ->values();
         $items = [];
         $linked = 0;
         $matched = 0;
@@ -114,6 +118,7 @@ class FincaraizListingReconciler
             'dry_run' => $dryRun,
             'environment' => $environment,
             'batch_limit' => $limit,
+            'batch_offset' => $offset,
             'candidates' => $codes->count(),
             'processed' => count($items),
             'matched' => $matched,

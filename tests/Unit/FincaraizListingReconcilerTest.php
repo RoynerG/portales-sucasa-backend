@@ -160,4 +160,38 @@ class FincaraizListingReconcilerTest extends TestCase
             'sync_status' => 'synced',
         ]);
     }
+
+    public function test_it_can_continue_after_unmatched_candidates_with_an_offset(): void
+    {
+        Property::create(['code' => '10000', 'status' => 'active']);
+        Property::create(['code' => '20000', 'status' => 'active']);
+        Property::create(['code' => '30000', 'status' => 'active']);
+        $client = $this->createMock(FincaraizClient::class);
+        $client->expects($this->once())
+            ->method('listListingsMany')
+            ->with(
+                'production-key',
+                'df03d199-be5c-4c5c-98f6-849361cb7fae',
+                ['20000'],
+                10,
+                '-created',
+                4
+            )
+            ->willReturn([
+                '20000' => ['ok' => true, 'status' => 200, 'data' => ['results' => []]],
+            ]);
+        $mapper = $this->createMock(FincaraizPropertyMapper::class);
+        $mapper->expects($this->never())->method('ensureLocalProperty');
+        $wordpress = $this->createMock(WordPressPropertyRepository::class);
+        $wordpress->method('enabled')->willReturn(false);
+
+        $result = (new FincaraizListingReconciler($client, $mapper, $wordpress))->reconcile([
+            'api_key' => 'production-key',
+            'client_id' => 'df03d199-be5c-4c5c-98f6-849361cb7fae',
+        ], 1, true, 1);
+
+        $this->assertSame(1, $result['batch_offset']);
+        $this->assertSame('20000', $result['items'][0]['code']);
+        $this->assertSame('not_found', $result['items'][0]['state']);
+    }
 }

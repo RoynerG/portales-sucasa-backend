@@ -145,6 +145,7 @@ class FincaraizController extends Controller
     {
         $data = $request->validate([
             'limit' => ['sometimes', 'integer', 'min:1', 'max:25'],
+            'offset' => ['sometimes', 'integer', 'min:0', 'max:100000'],
             'dry_run' => ['sometimes', 'boolean'],
             'confirmed' => ['required_if:dry_run,false', 'boolean'],
             'preview_token' => ['required_if:dry_run,false', 'nullable', 'uuid'],
@@ -160,7 +161,12 @@ class FincaraizController extends Controller
         $reconciler = $this->reconciler ?? app(FincaraizListingReconciler::class);
 
         if ($dryRun) {
-            $result = $reconciler->reconcile($settings, (int) ($data['limit'] ?? 10), true);
+            $result = $reconciler->reconcile(
+                $settings,
+                (int) ($data['limit'] ?? 10),
+                true,
+                (int) ($data['offset'] ?? 0)
+            );
             $token = (string) Str::uuid();
             $expiresAt = now()->addMinutes(max(1, (int) config('portals.fincaraiz.reconcile_preview_minutes', 10)));
             Cache::put($this->reconcilePreviewKey($token), [

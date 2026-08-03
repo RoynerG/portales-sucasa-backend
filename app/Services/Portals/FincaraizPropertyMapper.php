@@ -78,6 +78,7 @@ class FincaraizPropertyMapper
         return DB::connection('wordpress')
             ->table('wp_jet_cct_inmuebles')
             ->where('cct_status', 'publish')
+            ->where('estado', 'Publico')
             ->whereRaw('TRIM(codigo) = ?', [trim($code)])
             ->first();
     }
@@ -537,7 +538,7 @@ class FincaraizPropertyMapper
                 'bathrooms' => $this->positiveInteger($row->banos ?? null) ?? 0,
                 'parking_spaces' => $this->positiveInteger($row->parqueaderos ?? null) ?? 0,
                 'age_years' => $this->positiveInteger($row->edad ?? null) ?? 0,
-                'stratum' => $this->positiveInteger($row->estrato ?? null) ?? 0,
+                'stratum' => $this->stratum($row->estrato ?? null),
                 'furnished' => $this->yesNo($row->amoblado ?? null),
                 'status' => $this->localStatus($row->estado ?? null),
                 'contact_name' => $this->text($advisor?->nombre ?? $row->funcionario ?? ''),

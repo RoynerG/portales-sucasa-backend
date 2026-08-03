@@ -32,10 +32,19 @@ class FincaraizPropertyMapperTest extends TestCase
             $table->increments('_ID');
             $table->string('cct_status');
             $table->string('codigo');
+            $table->string('estado');
         });
         DB::connection('wordpress')->table('wp_jet_cct_inmuebles')->insert([
-            'cct_status' => 'publish',
-            'codigo' => ' 96187 ',
+            [
+                'cct_status' => 'publish',
+                'codigo' => '96187',
+                'estado' => 'En borrador',
+            ],
+            [
+                'cct_status' => 'publish',
+                'codigo' => ' 96187 ',
+                'estado' => 'Publico',
+            ],
         ]);
         $mapper = new class extends FincaraizPropertyMapper
         {

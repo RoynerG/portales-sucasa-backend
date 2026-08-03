@@ -239,6 +239,7 @@ class FincaraizController extends Controller
                 'items' => collect($result['items'] ?? [])
                     ->filter(fn (array $item) => in_array(($item['state'] ?? null), ['ready', 'ready_to_link'], true)
                         || ! empty($item['listing_ids']))
+                    ->concat($result['unreferenced_items'] ?? [])
                     ->values()
                     ->all(),
             ], $expiresAt);

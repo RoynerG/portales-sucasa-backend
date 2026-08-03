@@ -138,6 +138,7 @@ class FincaraizListingRetirerTest extends TestCase
         $this->assertSame(2, $result['review']);
         $this->assertSame(1, $result['removable_codes']);
         $this->assertSame(2, $result['removable_listings']);
+        $this->assertCount(2, $result['unreferenced_items']);
         $this->assertSame('protected_unlinked', $result['items'][0]['state']);
         $this->assertCount(2, $result['items'][0]['listing_ids']);
         $this->assertSame([], $result['items'][1]['listing_ids']);

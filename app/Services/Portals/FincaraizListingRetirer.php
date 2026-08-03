@@ -2,8 +2,11 @@
 
 namespace App\Services\Portals;
 
+use App\Models\Integration;
+use App\Models\PropertySyncStatus;
 use App\Services\WordPressPropertyRepository;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class FincaraizListingRetirer
@@ -91,13 +94,29 @@ class FincaraizListingRetirer
             ];
         })->values();
         $reviewItems = $items->whereNotIn('state', ['ready', 'ready_to_link']);
-        $removableItems = $reviewItems->filter(
-            fn (array $item) => ! empty($item['listing_ids'])
-        );
-        $removableListingIds = $removableItems
-            ->flatMap(fn (array $item) => $item['listing_ids'])
-            ->unique()
+        $referencedListingIds = $this->referencedListingIds();
+        $rowsByPropertyId = $rows->keyBy('fr_property_id');
+        $unreferencedItems = collect($remote['listings'])
+            ->map(function (array $listing) use ($rowsByPropertyId) {
+                $listingId = trim((string) ($listing['id'] ?? ''));
+                $propertyId = trim((string) ($listing['frPropertyId'] ?? ''));
+                $row = $rowsByPropertyId->get($propertyId);
+
+                return [
+                    'code' => trim((string) ($row['code'] ?? '')),
+                    'fr_property_id' => $propertyId,
+                    'listing_id' => $listingId,
+                    'state' => 'unreferenced_remote',
+                    'message' => 'Aviso activo sin referencia local; puede retirarse para liberar cupo.',
+                ];
+            })
+            ->filter(fn (array $item) => $item['code'] !== ''
+                && $item['fr_property_id'] !== ''
+                && Str::isUuid($item['listing_id'])
+                && ! $referencedListingIds->contains($item['listing_id']))
+            ->unique('listing_id')
             ->values();
+        $removableListingIds = $unreferencedItems->pluck('listing_id')->unique()->values();
 
         return [
             'ok' => true,
@@ -110,8 +129,9 @@ class FincaraizListingRetirer
             'linkable' => $items->where('state', 'ready_to_link')->count(),
             'protected' => $items->whereIn('state', ['ready_to_link', 'protected_unlinked'])->count(),
             'review' => $reviewItems->count(),
-            'removable_codes' => $removableItems->count(),
+            'removable_codes' => $unreferencedItems->pluck('code')->unique()->count(),
             'removable_listings' => $removableListingIds->count(),
+            'unreferenced_items' => $unreferencedItems->all(),
             'items' => $items->all(),
         ];
     }
@@ -201,14 +221,18 @@ class FincaraizListingRetirer
         $clientId = trim((string) ($settings['client_id'] ?? ''));
         $items = collect($previewItems)
             ->filter(fn ($item) => is_array($item)
-                && in_array(($item['state'] ?? null), ['ambiguous', 'protected_unlinked'], true)
+                && in_array(($item['state'] ?? null), ['ambiguous', 'protected_unlinked', 'unreferenced_remote'], true)
                 && trim((string) ($item['code'] ?? '')) !== ''
                 && trim((string) ($item['fr_property_id'] ?? '')) !== ''
-                && is_array($item['listing_ids'] ?? null)
-                && ! empty($item['listing_ids']))
+                && (Str::isUuid(trim((string) ($item['listing_id'] ?? '')))
+                    || (is_array($item['listing_ids'] ?? null) && ! empty($item['listing_ids']))))
             ->values();
         $targets = $items->flatMap(function (array $item) {
-            return collect($item['listing_ids'])
+            $listingIds = Str::isUuid(trim((string) ($item['listing_id'] ?? '')))
+                ? [$item['listing_id']]
+                : ($item['listing_ids'] ?? []);
+
+            return collect($listingIds)
                 ->map(fn ($listingId) => trim((string) $listingId))
                 ->filter(fn (string $listingId) => Str::isUuid($listingId))
                 ->map(fn (string $listingId) => [
@@ -264,6 +288,29 @@ class FincaraizListingRetirer
         return $this->wordpress->activeCodes()
             ->map(fn ($code) => trim((string) $code))
             ->filter()
+            ->unique()
+            ->values();
+    }
+
+    protected function referencedListingIds()
+    {
+        if (! Schema::hasTable('integrations') || ! Schema::hasTable('property_sync_statuses')) {
+            return collect();
+        }
+
+        $integrationId = Integration::query()->where('slug', 'fincaraiz')->value('id');
+        if (! $integrationId) {
+            return collect();
+        }
+
+        return PropertySyncStatus::query()
+            ->where('integration_id', $integrationId)
+            ->where('environment', config('portals.fincaraiz.environment'))
+            ->where('portal_variant', 'default')
+            ->whereNotNull('external_id')
+            ->pluck('external_id')
+            ->map(fn ($listingId) => trim((string) $listingId))
+            ->filter(fn (string $listingId) => Str::isUuid($listingId))
             ->unique()
             ->values();
     }

@@ -13,10 +13,41 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use stdClass;
 use Tests\TestCase;
 
 class FincaraizPropertyMapperTest extends TestCase
 {
+    public function test_wordpress_lookup_normalizes_whitespace_in_property_codes(): void
+    {
+        config()->set('sources.properties', 'wordpress');
+        config()->set('database.connections.wordpress', [
+            'driver' => 'sqlite',
+            'database' => ':memory:',
+            'prefix' => '',
+            'foreign_key_constraints' => true,
+        ]);
+        DB::purge('wordpress');
+        Schema::connection('wordpress')->create('wp_jet_cct_inmuebles', function (Blueprint $table): void {
+            $table->increments('_ID');
+            $table->string('cct_status');
+            $table->string('codigo');
+        });
+        DB::connection('wordpress')->table('wp_jet_cct_inmuebles')->insert([
+            'cct_status' => 'publish',
+            'codigo' => ' 96187 ',
+        ]);
+        $mapper = new class extends FincaraizPropertyMapper
+        {
+            public function exposedSourceRow(string $code): ?stdClass
+            {
+                return $this->sourceRow($code);
+            }
+        };
+
+        $this->assertSame(' 96187 ', $mapper->exposedSourceRow('96187')?->codigo);
+    }
+
     public function test_mapper_builds_the_documented_listing_shape(): void
     {
         $property = new Property([

@@ -78,7 +78,7 @@ class FincaraizPropertyMapper
         return DB::connection('wordpress')
             ->table('wp_jet_cct_inmuebles')
             ->where('cct_status', 'publish')
-            ->where('codigo', $code)
+            ->whereRaw('TRIM(codigo) = ?', [trim($code)])
             ->first();
     }
 
@@ -510,7 +510,7 @@ class FincaraizPropertyMapper
         $advisor = $this->sourceAdvisor($row);
 
         return Property::updateOrCreate(
-            ['code' => (string) $row->codigo],
+            ['code' => trim((string) $row->codigo)],
             [
                 'title' => trim(($row->tipo_inmueble ?: 'Inmueble').' en '.($row->tipo_negocio ?: 'gestión')),
                 'description' => $this->sourceDescription($row),

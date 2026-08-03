@@ -148,4 +148,70 @@ class FincaraizNeighborhoodControllerTest extends TestCase
         $this->assertSame(1, $data['summary']['configured']);
         $this->assertSame('Centro', $data['neighborhoods'][0]['fincaraiz_location_name']);
     }
+
+    public function test_it_accepts_an_official_commune_as_a_neighborhood_mapping(): void
+    {
+        $city = City::create([
+            'dane_code' => '13052',
+            'name' => 'Arjona',
+            'department' => 'Bolívar',
+        ]);
+        $neighborhood = Neighborhood::create([
+            'city_id' => $city->id,
+            'name' => 'Comuna 01',
+            'active' => true,
+        ]);
+        $controller = new FincaraizNeighborhoodController;
+        $locationId = '89429bab-23ab-4dcb-8c23-2cd3503dd912';
+
+        $controller->update(Request::create('/fincaraiz/neighborhoods/'.$neighborhood->id, 'PATCH', [
+            'location_id' => $locationId,
+            'name' => 'Comuna 01',
+            'location_type' => 'COMMUNE',
+            'country' => 'Colombia',
+            'state' => 'Bolívar',
+            'city' => 'Arjona',
+        ]), $neighborhood->id);
+
+        $mapping = $neighborhood->portalMappings()->firstOrFail();
+        $this->assertSame($locationId, $mapping->external_id);
+        $this->assertSame('COMMUNE', $mapping->extra['location_type']);
+
+        $data = $controller->index(Request::create('/fincaraiz/neighborhoods', 'GET'))->getData(true)['Datos'];
+        $this->assertSame(1, $data['summary']['configured']);
+        $this->assertSame('COMMUNE', $data['neighborhoods'][0]['fincaraiz_location_type']);
+    }
+
+    public function test_it_accepts_an_official_city_as_a_neighborhood_mapping(): void
+    {
+        $city = City::create([
+            'dane_code' => '13001',
+            'name' => 'Cartagena',
+            'department' => 'Bolívar',
+        ]);
+        $neighborhood = Neighborhood::create([
+            'city_id' => $city->id,
+            'name' => 'Zona rural Cartagena',
+            'active' => true,
+        ]);
+        $controller = new FincaraizNeighborhoodController;
+        $locationId = 'bf935e5f-e847-45de-a975-77231efde264';
+
+        $controller->update(Request::create('/fincaraiz/neighborhoods/'.$neighborhood->id, 'PATCH', [
+            'location_id' => $locationId,
+            'name' => 'Cartagena',
+            'location_type' => 'CITY',
+            'country' => 'Colombia',
+            'state' => 'Bolívar',
+            'city' => 'Cartagena',
+        ]), $neighborhood->id);
+
+        $mapping = $neighborhood->portalMappings()->firstOrFail();
+        $this->assertSame($locationId, $mapping->external_id);
+        $this->assertSame('CITY', $mapping->extra['location_type']);
+
+        $data = $controller->index(Request::create('/fincaraiz/neighborhoods', 'GET'))->getData(true)['Datos'];
+        $this->assertSame(1, $data['summary']['configured']);
+        $this->assertSame('CITY', $data['neighborhoods'][0]['fincaraiz_location_type']);
+    }
 }

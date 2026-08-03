@@ -69,7 +69,7 @@ El preflight valida antes de enviar los campos obligatorios del contrato:
 - códigos enumerados para condición, antigüedad, habitaciones, baños, piso y garajes;
 - hasta 30 imágenes con una sola principal.
 
-El UUID del barrio (`location_main_id`) se obtiene con `GET /location/{name}`. En el panel, abre el inmueble, entra a **Portales → Fincaraíz → Preflight** y pulsa **Buscar y homologar barrio**. Busca por nombre, confirma ciudad/departamento y elige preferiblemente un resultado de tipo `NEIGHBOURHOOD`. El panel guarda el UUID para todos los inmuebles del mismo barrio local. Si aún no está homologado, el payload sigue siendo válido con coordenadas y muestra una advertencia. Los IDs ficticios del seeder no se envían.
+El UUID del barrio (`location_main_id`) se obtiene con `GET /location/{name}`. En el panel, abre el inmueble, entra a **Portales → Fincaraíz → Preflight** y pulsa **Buscar y homologar barrio**. Busca por nombre, confirma ciudad/departamento y elige un resultado de tipo `NEIGHBOURHOOD`, `COMMUNE` o `CITY` cuando esa ubicación corresponda al barrio local. El panel guarda el UUID para todos los inmuebles de ese barrio local. Si aún no está homologado, el payload sigue siendo válido con coordenadas y muestra una advertencia. Los IDs ficticios del seeder no se envían.
 
 También se puede administrar todo el catálogo desde **Barrios → Fincaraíz**. La migración agrega en WordPress:
 
@@ -77,7 +77,7 @@ También se puede administrar todo el catálogo desde **Barrios → Fincaraíz**
 - `wp_jet_cct_barrios.fincaraiz_location_name`;
 - `wp_jet_cct_barrios.fincaraiz_location_type`.
 
-La selección solo permite guardar resultados oficiales de tipo `NEIGHBOURHOOD` y sincroniza el UUID con `portal_mappings`, que es la homologación consumida por el preflight de todos los inmuebles del mismo barrio.
+La selección permite guardar resultados oficiales de tipo `NEIGHBOURHOOD`, `COMMUNE` o `CITY` y sincroniza el UUID con `portal_mappings`, que es la homologación consumida por el preflight de todos los inmuebles del mismo barrio local.
 
 ## Flujo de prueba recomendado
 

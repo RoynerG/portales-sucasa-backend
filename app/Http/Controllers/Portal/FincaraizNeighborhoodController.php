@@ -60,7 +60,7 @@ class FincaraizNeighborhoodController extends Controller
         $location = $request->validate([
             'location_id' => ['required', 'uuid'],
             'name' => ['required', 'string', 'max:200'],
-            'location_type' => ['required', 'in:NEIGHBOURHOOD'],
+            'location_type' => ['required', 'in:NEIGHBOURHOOD,COMMUNE,CITY'],
             'country' => ['nullable', 'string', 'max:100'],
             'state' => ['nullable', 'string', 'max:100'],
             'city' => ['nullable', 'string', 'max:100'],

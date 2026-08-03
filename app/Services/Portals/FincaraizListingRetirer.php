@@ -57,19 +57,17 @@ class FincaraizListingRetirer
                 ];
             }
             if ($matches->count() !== 1) {
-                $rawListingIds = $matches
+                $listingIds = $matches
                     ->pluck('id')
-                    ->map(fn ($id) => trim((string) $id));
-                $allListingIdsAreValid = $rawListingIds
-                    ->every(fn (string $id) => Str::isUuid($id));
-                $listingIds = $rawListingIds
+                    ->map(fn ($id) => trim((string) $id))
+                    ->filter(fn (string $id) => Str::isUuid($id))
                     ->unique()
                     ->values();
 
                 return $row + [
                     'state' => $isPublic ? 'protected_unlinked' : 'ambiguous',
                     'matches' => $matches->count(),
-                    'listing_ids' => $allListingIdsAreValid ? $listingIds->all() : [],
+                    'listing_ids' => $listingIds->all(),
                     'message' => $isPublic
                         ? 'Sigue público localmente y tiene varias coincidencias activas. Puede retirarlas manualmente desde esta vista previa.'
                         : 'El código de Fincaraíz devolvió más de un aviso activo. Puede retirarlos manualmente desde esta vista previa.',
@@ -94,6 +92,7 @@ class FincaraizListingRetirer
             ];
         })->values();
         $reviewItems = $items->whereNotIn('state', ['ready', 'ready_to_link']);
+        $reviewRemovableItems = $reviewItems->filter(fn (array $item) => ! empty($item['listing_ids']));
         $referencedListingIds = $this->referencedListingIds();
         $rowsByPropertyId = $rows->keyBy('fr_property_id');
         $unreferencedItems = collect($remote['listings'])
@@ -116,7 +115,15 @@ class FincaraizListingRetirer
                 && ! $referencedListingIds->contains($item['listing_id']))
             ->unique('listing_id')
             ->values();
-        $removableListingIds = $unreferencedItems->pluck('listing_id')->unique()->values();
+        $removableListingIds = $reviewRemovableItems
+            ->flatMap(fn (array $item) => $item['listing_ids'])
+            ->concat($unreferencedItems->pluck('listing_id'))
+            ->unique()
+            ->values();
+        $removableCodes = $reviewRemovableItems->pluck('code')
+            ->concat($unreferencedItems->pluck('code'))
+            ->unique()
+            ->count();
 
         return [
             'ok' => true,
@@ -129,7 +136,7 @@ class FincaraizListingRetirer
             'linkable' => $items->where('state', 'ready_to_link')->count(),
             'protected' => $items->whereIn('state', ['ready_to_link', 'protected_unlinked'])->count(),
             'review' => $reviewItems->count(),
-            'removable_codes' => $unreferencedItems->pluck('code')->unique()->count(),
+            'removable_codes' => $removableCodes,
             'removable_listings' => $removableListingIds->count(),
             'unreferenced_items' => $unreferencedItems->all(),
             'items' => $items->all(),

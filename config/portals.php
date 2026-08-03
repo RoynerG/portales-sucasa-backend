@@ -40,6 +40,8 @@ return [
         'webhook_verify_token' => env('FINCARAIZ_WEBHOOK_VERIFY_TOKEN'),
         'webhook_url' => env('FINCARAIZ_WEBHOOK_URL'),
         'timeout' => env('FINCARAIZ_TIMEOUT', 30),
+        'reconcile_concurrency' => env('FINCARAIZ_RECONCILE_CONCURRENCY', 4),
+        'reconcile_preview_minutes' => env('FINCARAIZ_RECONCILE_PREVIEW_MINUTES', 10),
     ],
 
     'ciencuadras' => [

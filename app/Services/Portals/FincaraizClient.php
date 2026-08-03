@@ -4,8 +4,11 @@ namespace App\Services\Portals;
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\Pool;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Psr\Http\Message\ResponseInterface;
+use Throwable;
 
 class FincaraizClient
 {
@@ -52,6 +55,57 @@ class FincaraizClient
         ], fn ($value) => $value !== null && $value !== ''), [
             'Cookie' => $clientId,
         ]);
+    }
+
+    public function listListingsMany(
+        string $apiKey,
+        string $clientId,
+        array $searches,
+        int $pageSize = 10,
+        string $ordering = '-created',
+        int $concurrency = 4
+    ): array {
+        $searches = collect($searches)
+            ->map(fn ($search) => trim((string) $search))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $requests = function () use ($apiKey, $clientId, $searches, $pageSize, $ordering) {
+            foreach ($searches as $search) {
+                yield $search => fn () => $this->http->requestAsync(
+                    'GET',
+                    $this->url('/listing'),
+                    $this->requestOptions($apiKey, null, [
+                        'page' => 1,
+                        'page_size' => min(100, max(1, $pageSize)),
+                        'search' => $search,
+                        'ordering' => $ordering,
+                    ], ['Cookie' => $clientId], true)
+                );
+            }
+        };
+
+        $results = [];
+        $pool = new Pool($this->http, $requests(), [
+            'concurrency' => min(8, max(1, $concurrency)),
+            'fulfilled' => function (ResponseInterface $response, string $search) use (&$results): void {
+                $results[$search] = $this->responseResult($response);
+            },
+            'rejected' => function (Throwable $exception, string $search) use (&$results): void {
+                $results[$search] = $this->exceptionResult($exception, '/listing');
+            },
+        ]);
+        $pool->promise()->wait();
+
+        return collect($searches)
+            ->mapWithKeys(fn (string $search) => [$search => $results[$search] ?? [
+                'ok' => false,
+                'status' => 502,
+                'data' => ['error' => 'La consulta no devolvió respuesta.'],
+            ]])
+            ->all();
     }
 
     public function getListing(string $apiKey, string $listingId): array
@@ -117,7 +171,27 @@ class FincaraizClient
         array $query = [],
         array $headers = []
     ): array {
-        if (strtoupper($method) === 'GET') {
+        try {
+            $response = $this->http->request(
+                $method,
+                $this->url($path),
+                $this->requestOptions($apiKey, $body, $query, $headers, strtoupper($method) === 'GET')
+            );
+
+            return $this->responseResult($response);
+        } catch (GuzzleException $e) {
+            return $this->exceptionResult($e, $path);
+        }
+    }
+
+    protected function requestOptions(
+        string $apiKey,
+        ?array $body = null,
+        array $query = [],
+        array $headers = [],
+        bool $cacheBust = false
+    ): array {
+        if ($cacheBust) {
             $query[$this->cacheBusterName()] = (string) Str::uuid();
         }
 
@@ -135,37 +209,42 @@ class FincaraizClient
             $options['json'] = $body;
         }
 
-        try {
-            $response = $this->http->request(
-                $method,
-                rtrim((string) config('portals.fincaraiz.api_url'), '/').$path,
-                $options
-            );
-            $status = $response->getStatusCode();
-            $raw = (string) $response->getBody();
-            $decoded = $raw === '' ? [] : json_decode($raw, true);
-            $data = json_last_error() === JSON_ERROR_NONE ? $decoded : ['raw' => $raw];
+        return $options;
+    }
 
-            return [
-                'ok' => $status >= 200 && $status < 300,
-                'status' => $status,
-                'data' => $data,
-            ];
-        } catch (GuzzleException $e) {
-            Log::warning('Fincaraiz request failed', [
-                'environment' => config('portals.fincaraiz.environment'),
-                'path' => $path,
-                'error' => $e->getMessage(),
-            ]);
+    protected function responseResult(ResponseInterface $response): array
+    {
+        $status = $response->getStatusCode();
+        $raw = (string) $response->getBody();
+        $decoded = $raw === '' ? [] : json_decode($raw, true);
 
-            return [
-                'ok' => false,
-                'status' => method_exists($e, 'getResponse') && $e->getResponse()
-                    ? $e->getResponse()->getStatusCode()
-                    : 502,
-                'data' => ['error' => $e->getMessage()],
-            ];
-        }
+        return [
+            'ok' => $status >= 200 && $status < 300,
+            'status' => $status,
+            'data' => json_last_error() === JSON_ERROR_NONE ? $decoded : ['raw' => $raw],
+        ];
+    }
+
+    protected function exceptionResult(Throwable $exception, string $path): array
+    {
+        Log::warning('Fincaraiz request failed', [
+            'environment' => config('portals.fincaraiz.environment'),
+            'path' => $path,
+            'error' => $exception->getMessage(),
+        ]);
+
+        return [
+            'ok' => false,
+            'status' => method_exists($exception, 'getResponse') && $exception->getResponse()
+                ? $exception->getResponse()->getStatusCode()
+                : 502,
+            'data' => ['error' => $exception->getMessage()],
+        ];
+    }
+
+    protected function url(string $path): string
+    {
+        return rtrim((string) config('portals.fincaraiz.api_url'), '/').$path;
     }
 
     protected function batch(array $payload): array

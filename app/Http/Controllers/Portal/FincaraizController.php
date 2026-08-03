@@ -13,6 +13,8 @@ use App\Services\Portals\FincaraizPropertyMapper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 
 class FincaraizController extends Controller
 {
@@ -145,6 +147,7 @@ class FincaraizController extends Controller
             'limit' => ['sometimes', 'integer', 'min:1', 'max:25'],
             'dry_run' => ['sometimes', 'boolean'],
             'confirmed' => ['required_if:dry_run,false', 'boolean'],
+            'preview_token' => ['required_if:dry_run,false', 'nullable', 'uuid'],
         ]);
         $dryRun = (bool) ($data['dry_run'] ?? true);
         if (! $dryRun) {
@@ -156,11 +159,44 @@ class FincaraizController extends Controller
         $this->clientId($settings);
         $reconciler = $this->reconciler ?? app(FincaraizListingReconciler::class);
 
-        return response()->json(['Datos' => $reconciler->reconcile(
-            $settings,
-            (int) ($data['limit'] ?? 10),
-            $dryRun
-        )]);
+        if ($dryRun) {
+            $result = $reconciler->reconcile($settings, (int) ($data['limit'] ?? 10), true);
+            $token = (string) Str::uuid();
+            $expiresAt = now()->addMinutes(max(1, (int) config('portals.fincaraiz.reconcile_preview_minutes', 10)));
+            Cache::put($this->reconcilePreviewKey($token), [
+                'user_id' => $request->user()->id,
+                'environment' => (string) config('portals.fincaraiz.environment', 'qa'),
+                'client_id' => trim((string) $settings['client_id']),
+                'items' => collect($result['items'] ?? [])
+                    ->where('state', 'ready')
+                    ->values()
+                    ->all(),
+            ], $expiresAt);
+            $result['preview_token'] = $token;
+            $result['preview_expires_at'] = $expiresAt->toIso8601String();
+
+            return response()->json(['Datos' => $result]);
+        }
+
+        $token = (string) $data['preview_token'];
+        $cacheKey = $this->reconcilePreviewKey($token);
+        $preview = Cache::get($cacheKey);
+        abort_unless(is_array($preview), 422, 'El análisis venció. Analiza nuevamente los inmuebles.');
+        abort_unless((int) ($preview['user_id'] ?? 0) === (int) $request->user()->id, 403, 'Este análisis pertenece a otro usuario.');
+        abort_unless(
+            ($preview['environment'] ?? null) === (string) config('portals.fincaraiz.environment', 'qa')
+                && hash_equals((string) ($preview['client_id'] ?? ''), trim((string) $settings['client_id'])),
+            422,
+            'La configuración de Fincaraíz cambió. Analiza nuevamente los inmuebles.'
+        );
+        Cache::forget($cacheKey);
+
+        return response()->json(['Datos' => $reconciler->applyPreview($preview['items'] ?? [])]);
+    }
+
+    protected function reconcilePreviewKey(string $token): string
+    {
+        return 'fincaraiz:reconcile-preview:'.$token;
     }
 
     public function payload(Request $request, string $code): JsonResponse

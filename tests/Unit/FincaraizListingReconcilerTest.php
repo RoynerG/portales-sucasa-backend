@@ -64,20 +64,25 @@ class FincaraizListingReconcilerTest extends TestCase
         $listingId = '7be7c83d-10b1-417b-a661-484ff5ebd821';
 
         $client = $this->createMock(FincaraizClient::class);
-        $client->expects($this->exactly(2))->method('listListings')->willReturnCallback(
-            fn (string $apiKey, string $clientId, int $page, int $pageSize, string $search) => [
+        $client->expects($this->once())->method('listListingsMany')->willReturn([
+            '53824' => [
                 'ok' => true,
                 'status' => 200,
-                'data' => ['results' => $search === '53824' ? [[
+                'data' => ['results' => [[
                     'id' => $listingId,
                     'frPropertyId' => '1511253',
                     'status' => 4,
-                ]] : [[
+                ]]],
+            ],
+            '99999' => [
+                'ok' => true,
+                'status' => 200,
+                'data' => ['results' => [[
                     'id' => 'a59f7867-df68-4464-b7cc-eab36ee14ad7',
                     'status' => 1,
                 ]]],
-            ]
-        );
+            ],
+        ]);
         $mapper = $this->createMock(FincaraizPropertyMapper::class);
         $mapper->expects($this->once())->method('ensureLocalProperty')->with('53824')->willReturn($property);
         $wordpress = $this->createMock(WordPressPropertyRepository::class);
@@ -103,13 +108,15 @@ class FincaraizListingReconcilerTest extends TestCase
     {
         Property::create(['code' => '53824', 'status' => 'active']);
         $client = $this->createMock(FincaraizClient::class);
-        $client->method('listListings')->willReturn([
-            'ok' => true,
-            'status' => 200,
-            'data' => ['results' => [
-                ['id' => '7be7c83d-10b1-417b-a661-484ff5ebd821', 'status' => 4],
-                ['id' => 'a59f7867-df68-4464-b7cc-eab36ee14ad7', 'status' => 4],
-            ]],
+        $client->method('listListingsMany')->willReturn([
+            '53824' => [
+                'ok' => true,
+                'status' => 200,
+                'data' => ['results' => [
+                    ['id' => '7be7c83d-10b1-417b-a661-484ff5ebd821', 'status' => 4],
+                    ['id' => 'a59f7867-df68-4464-b7cc-eab36ee14ad7', 'status' => 4],
+                ]],
+            ],
         ]);
         $mapper = $this->createMock(FincaraizPropertyMapper::class);
         $mapper->expects($this->never())->method('ensureLocalProperty');
@@ -124,5 +131,33 @@ class FincaraizListingReconcilerTest extends TestCase
         $this->assertTrue($result['dry_run']);
         $this->assertSame('ambiguous', $result['items'][0]['state']);
         $this->assertDatabaseCount('property_sync_statuses', 0);
+    }
+
+    public function test_it_applies_a_cached_preview_without_querying_fincaraiz_again(): void
+    {
+        $property = Property::create(['code' => '53824', 'status' => 'active']);
+        $listingId = '7be7c83d-10b1-417b-a661-484ff5ebd821';
+        $client = $this->createMock(FincaraizClient::class);
+        $client->expects($this->never())->method('listListingsMany');
+        $mapper = $this->createMock(FincaraizPropertyMapper::class);
+        $mapper->expects($this->once())->method('ensureLocalProperty')->with('53824')->willReturn($property);
+        $wordpress = $this->createMock(WordPressPropertyRepository::class);
+        $wordpress->method('enabled')->willReturn(false);
+
+        $result = (new FincaraizListingReconciler($client, $mapper, $wordpress))->applyPreview([[
+            'code' => '53824',
+            'state' => 'ready',
+            'listing_id' => $listingId,
+            'fr_property_id' => '1511253',
+            'status' => 4,
+        ]]);
+
+        $this->assertSame(1, $result['linked']);
+        $this->assertSame('linked', $result['items'][0]['state']);
+        $this->assertDatabaseHas('property_sync_statuses', [
+            'property_id' => $property->id,
+            'external_id' => $listingId,
+            'sync_status' => 'synced',
+        ]);
     }
 }

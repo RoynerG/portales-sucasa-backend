@@ -31,9 +31,21 @@ class FincaraizListingReconciler
         $linked = 0;
         $matched = 0;
         $throttled = false;
+        $responses = $this->client->listListingsMany(
+            $apiKey,
+            $clientId,
+            $codes->all(),
+            10,
+            '-created',
+            (int) config('portals.fincaraiz.reconcile_concurrency', 4)
+        );
 
         foreach ($codes as $code) {
-            $response = $this->client->listListings($apiKey, $clientId, 1, 10, $code, '-created');
+            $response = $responses[$code] ?? [
+                'ok' => false,
+                'status' => 502,
+                'data' => ['error' => 'La consulta no devolvió respuesta.'],
+            ];
             if (! ($response['ok'] ?? false)) {
                 $status = (int) ($response['status'] ?? 0);
                 $items[] = [
@@ -45,7 +57,6 @@ class FincaraizListingReconciler
                 ];
                 if ($status === 429) {
                     $throttled = true;
-                    break;
                 }
 
                 continue;
@@ -86,28 +97,7 @@ class FincaraizListingReconciler
 
             if (! $dryRun) {
                 try {
-                    $property = $this->mapper->ensureLocalProperty($code);
-                    PropertySyncStatus::updateOrCreate(
-                        [
-                            'property_id' => $property->id,
-                            'integration_id' => $integration->id,
-                            'environment' => $environment,
-                            'portal_variant' => 'default',
-                        ],
-                        [
-                            'sync_status' => 'synced',
-                            'external_id' => $listingId,
-                            'last_response' => [
-                                'action' => 'reconcile_active_listing',
-                                'source' => 'GET /listing?search='.$code,
-                                'fr_property_id' => $listing['frPropertyId'] ?? null,
-                                'listing' => $listing,
-                            ],
-                            'last_error' => null,
-                            'last_synced_at' => now(),
-                            'last_attempt_at' => now(),
-                        ]
-                    );
+                    $this->storeReference($integration, $environment, $item);
                     $linked++;
                 } catch (Throwable $exception) {
                     report($exception);
@@ -128,10 +118,87 @@ class FincaraizListingReconciler
             'processed' => count($items),
             'matched' => $matched,
             'linked' => $linked,
-            'remaining' => max(0, $this->candidateCodes($integration->id, $environment)->count() - $linked),
+            'remaining' => $this->candidateCodes($integration->id, $environment)->count(),
             'throttled' => $throttled,
             'items' => $items,
         ];
+    }
+
+    public function applyPreview(array $items): array
+    {
+        $environment = (string) config('portals.fincaraiz.environment', 'qa');
+        $integration = Integration::where('slug', 'fincaraiz')->firstOrFail();
+        $items = collect($items)
+            ->filter(fn ($item) => is_array($item)
+                && ($item['state'] ?? null) === 'ready'
+                && trim((string) ($item['code'] ?? '')) !== ''
+                && Str::isUuid(trim((string) ($item['listing_id'] ?? ''))))
+            ->unique('code')
+            ->values();
+        $results = [];
+        $linked = 0;
+
+        foreach ($items as $item) {
+            $item['code'] = trim((string) $item['code']);
+            $item['listing_id'] = trim((string) $item['listing_id']);
+            $item['state'] = 'linked';
+
+            try {
+                $this->storeReference($integration, $environment, $item);
+                $linked++;
+            } catch (Throwable $exception) {
+                report($exception);
+                $item['state'] = 'local_error';
+                $item['message'] = $exception->getMessage();
+                unset($item['listing_id']);
+            }
+
+            $results[] = $item;
+        }
+
+        return [
+            'dry_run' => false,
+            'environment' => $environment,
+            'batch_limit' => $items->count(),
+            'candidates' => $items->count(),
+            'processed' => $items->count(),
+            'matched' => $items->count(),
+            'linked' => $linked,
+            'remaining' => $this->candidateCodes($integration->id, $environment)->count(),
+            'throttled' => false,
+            'items' => $results,
+        ];
+    }
+
+    protected function storeReference(Integration $integration, string $environment, array $item): void
+    {
+        $code = trim((string) $item['code']);
+        $property = $this->mapper->ensureLocalProperty($code);
+        PropertySyncStatus::updateOrCreate(
+            [
+                'property_id' => $property->id,
+                'integration_id' => $integration->id,
+                'environment' => $environment,
+                'portal_variant' => 'default',
+            ],
+            [
+                'sync_status' => 'synced',
+                'external_id' => trim((string) $item['listing_id']),
+                'last_response' => [
+                    'action' => 'reconcile_active_listing',
+                    'source' => 'GET /listing?search='.$code,
+                    'fr_property_id' => $item['fr_property_id'] ?? null,
+                    'listing' => [
+                        'id' => trim((string) $item['listing_id']),
+                        'frPropertyId' => $item['fr_property_id'] ?? null,
+                        'status' => 4,
+                    ],
+                ],
+                'last_error' => null,
+                'last_synced_at' => now(),
+                'last_attempt_at' => now(),
+            ]
+        );
     }
 
     protected function candidateCodes(int $integrationId, string $environment): Collection

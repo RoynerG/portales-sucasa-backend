@@ -70,6 +70,37 @@ class FincaraizClientTest extends TestCase
         $this->assertSame('Invalid API key', $result['data']['detail']);
     }
 
+    public function test_listing_searches_can_run_as_a_concurrent_batch(): void
+    {
+        $client = $this->clientWith([
+            new Response(200, [], json_encode(['results' => [['id' => 'first']]])),
+            new Response(200, [], json_encode(['results' => [['id' => 'second']]])),
+        ]);
+
+        $result = $client->listListingsMany(
+            'secret-key',
+            'client-uuid',
+            ['53824', '99999'],
+            10,
+            '-created',
+            2
+        );
+
+        $this->assertEquals(['53824', '99999'], array_keys($result));
+        $this->assertTrue($result['53824']['ok']);
+        $this->assertTrue($result['99999']['ok']);
+        $this->assertCount(2, $this->history);
+        $searches = collect($this->history)->mapWithKeys(function (array $transaction): array {
+            $request = $transaction['request'];
+            parse_str($request->getUri()->getQuery(), $query);
+            $this->assertSame('client-uuid', $request->getHeaderLine('Cookie'));
+            $this->assertNotEmpty($query['sucasa-cache']);
+
+            return [$query['search'] => true];
+        });
+        $this->assertEqualsCanonicalizing(['53824', '99999'], $searches->keys()->all());
+    }
+
     private function clientWith(array $responses): FincaraizClient
     {
         $this->history = [];

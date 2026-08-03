@@ -10,6 +10,7 @@ use App\Models\PropertySyncStatus;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use stdClass;
@@ -38,12 +39,10 @@ class AutoSyncFincaraiz extends Command
 
         $credentials = PortalCredential::query()
             ->where('integration_id', $integration->id)
-            ->whereNotNull('access_token')
             ->with('user')
             ->latest('updated_at')
             ->get();
-        $credential = $credentials->first(fn (PortalCredential $item) => (bool) data_get($item->data, 'auto_sync'))
-            ?? $credentials->first();
+        $credential = $this->preferredCredential($credentials);
         $enabled = (bool) data_get($credential?->data, 'auto_sync', config('portals.fincaraiz.auto_sync', false));
         if (! $enabled && ! $this->option('force')) {
             $this->info('Auto-sync de Fincaraíz apagado. Actívalo desde Integraciones → Fincaraíz → Configurar.');
@@ -134,6 +133,12 @@ class AutoSyncFincaraiz extends Command
         $this->info("Listo Fincaraíz. Verificar: {$summary['verify']} | Publicar: {$summary['publish']} | Actualizar: {$summary['update']} | Activar: {$summary['activate']} | Retirar: {$summary['pause']} | Omitidos: {$summary['skipped']} | Errores: {$summary['error']}");
 
         return $summary['error'] > 0 ? self::FAILURE : self::SUCCESS;
+    }
+
+    protected function preferredCredential(Collection $credentials): ?PortalCredential
+    {
+        return $credentials->first(fn (PortalCredential $item) => (bool) data_get($item->data, 'auto_sync'))
+            ?? $credentials->first();
     }
 
     protected function processCatalog(

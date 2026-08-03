@@ -364,9 +364,13 @@ class FincaraizController extends Controller
             ]);
         }
 
+        $fresh = $sync->fresh();
+
         return response()->json(['Datos' => $result + [
-            'sync_status' => $sync->fresh()->sync_status,
-            'external_id' => $sync->fresh()->external_id,
+            'sync_status' => $fresh->sync_status,
+            'external_id' => $fresh->external_id,
+            'action' => data_get($fresh->last_response, 'action'),
+            'requires_activation' => (bool) data_get($fresh->last_response, 'requires_activation', false),
         ]]);
     }
 

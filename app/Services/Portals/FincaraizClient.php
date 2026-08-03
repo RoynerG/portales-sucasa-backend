@@ -138,6 +138,55 @@ class FincaraizClient
         ]]);
     }
 
+    public function changeStatusesMany(
+        array $listingIds,
+        string $status,
+        string $clientId,
+        string $apiKey,
+        int $concurrency = 4
+    ): array {
+        $listingIds = collect($listingIds)
+            ->map(fn ($listingId) => trim((string) $listingId))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $requests = function () use ($listingIds, $status, $clientId, $apiKey) {
+            foreach ($listingIds as $listingId) {
+                yield $listingId => fn () => $this->http->requestAsync(
+                    'PATCH',
+                    $this->url('/listing/status'),
+                    $this->requestOptions($apiKey, [[
+                        'listing_id' => $listingId,
+                        'client_id' => $clientId,
+                        'status' => strtoupper($status),
+                    ]])
+                );
+            }
+        };
+
+        $results = [];
+        $pool = new Pool($this->http, $requests(), [
+            'concurrency' => min(8, max(1, $concurrency)),
+            'fulfilled' => function (ResponseInterface $response, string $listingId) use (&$results): void {
+                $results[$listingId] = $this->responseResult($response);
+            },
+            'rejected' => function (Throwable $exception, string $listingId) use (&$results): void {
+                $results[$listingId] = $this->exceptionResult($exception, '/listing/status');
+            },
+        ]);
+        $pool->promise()->wait();
+
+        return collect($listingIds)
+            ->mapWithKeys(fn (string $listingId) => [$listingId => $results[$listingId] ?? [
+                'ok' => false,
+                'status' => 502,
+                'data' => ['error' => 'La actualización no devolvió respuesta.'],
+            ]])
+            ->all();
+    }
+
     public function validateListings(string $clientId, array $identifiers, string $apiKey): array
     {
         return $this->request('POST', '/validate-listing', $apiKey, ['client_id' => $clientId] + $identifiers);

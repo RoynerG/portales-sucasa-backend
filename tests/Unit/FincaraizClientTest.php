@@ -101,6 +101,34 @@ class FincaraizClientTest extends TestCase
         $this->assertEqualsCanonicalizing(['53824', '99999'], $searches->keys()->all());
     }
 
+    public function test_status_changes_can_run_as_a_concurrent_batch(): void
+    {
+        $client = $this->clientWith([
+            new Response(200, [], json_encode(['task' => ['id' => 'task-one']])),
+            new Response(200, [], json_encode(['task' => ['id' => 'task-two']])),
+        ]);
+
+        $result = $client->changeStatusesMany(
+            ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'],
+            'DISABLED',
+            'client-uuid',
+            'secret-key',
+            2
+        );
+
+        $this->assertCount(2, $result);
+        $this->assertCount(2, $this->history);
+        foreach ($this->history as $transaction) {
+            $request = $transaction['request'];
+            $body = json_decode((string) $request->getBody(), true);
+            $this->assertSame('PATCH', $request->getMethod());
+            $this->assertSame('/management/api/1.0/listing/status', $request->getUri()->getPath());
+            $this->assertSame('secret-key', $request->getHeaderLine('apikey'));
+            $this->assertSame('client-uuid', $body[0]['client_id']);
+            $this->assertSame('DISABLED', $body[0]['status']);
+        }
+    }
+
     private function clientWith(array $responses): FincaraizClient
     {
         $this->history = [];

@@ -9,6 +9,7 @@ use App\Models\Property;
 use App\Models\PropertySyncStatus;
 use App\Services\Portals\FincaraizClient;
 use App\Services\Portals\FincaraizListingReconciler;
+use App\Services\Portals\FincaraizListingRetirer;
 use App\Services\Portals\FincaraizPropertyMapper;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,7 +22,8 @@ class FincaraizController extends Controller
     public function __construct(
         protected FincaraizClient $fr,
         protected FincaraizPropertyMapper $mapper,
-        protected ?FincaraizListingReconciler $reconciler = null
+        protected ?FincaraizListingReconciler $reconciler = null,
+        protected ?FincaraizListingRetirer $retirer = null
     ) {}
 
     public function status(Request $request): JsonResponse
@@ -203,6 +205,63 @@ class FincaraizController extends Controller
     protected function reconcilePreviewKey(string $token): string
     {
         return 'fincaraiz:reconcile-preview:'.$token;
+    }
+
+    public function retire(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'dry_run' => ['sometimes', 'boolean'],
+            'confirmed' => ['required_if:dry_run,false', 'boolean'],
+            'preview_token' => ['required_if:dry_run,false', 'nullable', 'uuid'],
+            'listings' => ['required_if:dry_run,true', 'array', 'max:1000'],
+            'listings.*.code' => ['required_with:listings', 'string', 'max:120'],
+            'listings.*.fr_property_id' => ['required_with:listings', 'string', 'max:120'],
+        ]);
+        $dryRun = (bool) ($data['dry_run'] ?? true);
+        $settings = $this->settings($request);
+        $this->apiKey($settings);
+        $this->clientId($settings);
+        $retirer = $this->retirer ?? app(FincaraizListingRetirer::class);
+
+        if ($dryRun) {
+            $result = $retirer->preview($settings, $data['listings'] ?? []);
+            if (! ($result['ok'] ?? false)) {
+                return response()->json(['Datos' => $result], 422);
+            }
+
+            $token = (string) Str::uuid();
+            $expiresAt = now()->addMinutes(max(1, (int) config('portals.fincaraiz.reconcile_preview_minutes', 10)));
+            Cache::put($this->retirePreviewKey($token), [
+                'user_id' => $request->user()->id,
+                'environment' => (string) config('portals.fincaraiz.environment', 'qa'),
+                'client_id' => trim((string) $settings['client_id']),
+                'items' => collect($result['items'] ?? [])->where('state', 'ready')->values()->all(),
+            ], $expiresAt);
+            $result['preview_token'] = $token;
+            $result['preview_expires_at'] = $expiresAt->toIso8601String();
+
+            return response()->json(['Datos' => $result]);
+        }
+
+        abort_unless(($data['confirmed'] ?? false) === true, 422, 'Confirma que deseas desactivar los avisos de Fincaraíz.');
+        $token = (string) $data['preview_token'];
+        $cacheKey = $this->retirePreviewKey($token);
+        $preview = Cache::pull($cacheKey);
+        abort_unless(is_array($preview), 422, 'El análisis venció o ya fue utilizado. Carga nuevamente el archivo.');
+        abort_unless((int) ($preview['user_id'] ?? 0) === (int) $request->user()->id, 403, 'Este análisis pertenece a otro usuario.');
+        abort_unless(
+            ($preview['environment'] ?? null) === (string) config('portals.fincaraiz.environment', 'qa')
+                && hash_equals((string) ($preview['client_id'] ?? ''), trim((string) $settings['client_id'])),
+            422,
+            'La configuración de Fincaraíz cambió. Carga nuevamente el archivo.'
+        );
+
+        return response()->json(['Datos' => $retirer->apply($settings, $preview['items'] ?? [])]);
+    }
+
+    protected function retirePreviewKey(string $token): string
+    {
+        return 'fincaraiz:retire-preview:'.$token;
     }
 
     public function payload(Request $request, string $code): JsonResponse

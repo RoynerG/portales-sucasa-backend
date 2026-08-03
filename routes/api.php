@@ -86,6 +86,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/fincaraiz/client', [FincaraizController::class, 'clientInfo']);
         Route::get('/fincaraiz/listings', [FincaraizController::class, 'listings']);
         Route::post('/fincaraiz/reconcile', [FincaraizController::class, 'reconcile']);
+        Route::post('/fincaraiz/retire', [FincaraizController::class, 'retire']);
         Route::get('/fincaraiz/locations', [FincaraizController::class, 'locations']);
         Route::get('/fincaraiz/neighborhoods', [FincaraizNeighborhoodController::class, 'index']);
         Route::patch('/fincaraiz/neighborhoods/{id}', [FincaraizNeighborhoodController::class, 'update']);

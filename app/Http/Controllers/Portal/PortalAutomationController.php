@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Portal;
 
 use App\Http\Controllers\Controller;
 use App\Models\Integration;
+use App\Models\PortalCredential;
 use App\Models\PropertySyncStatus;
 use App\Services\PortalErrorSummarizer;
 use App\Services\Portals\CiencuadrasActiveProperties;
@@ -252,6 +253,21 @@ class PortalAutomationController extends Controller
                 'limit' => (int) config('portals.ciencuadras.auto_sync_limit', 20),
                 'scan' => (int) config('portals.ciencuadras.auto_sync_scan', 500),
                 'schedule' => 'Ciencuadras reconcilia cada 10 minutos, publica cada 5 y verifica pendientes cada minuto.',
+            ];
+        }
+
+        if ($portal === 'fincaraiz') {
+            $integrationId = Integration::where('slug', 'fincaraiz')->value('id');
+            $credential = $integrationId ? PortalCredential::query()
+                ->where('integration_id', $integrationId)
+                ->latest('updated_at')
+                ->first() : null;
+
+            return [
+                'auto_sync' => (bool) data_get($credential?->data, 'auto_sync', config('portals.fincaraiz.auto_sync', false)),
+                'limit' => (int) data_get($credential?->data, 'auto_sync_limit', config('portals.fincaraiz.auto_sync_limit', 20)),
+                'scan' => (int) config('portals.fincaraiz.auto_sync_scan', 500),
+                'schedule' => 'Publicación, actualización, retiro y verificación automática cada 5 minutos.',
             ];
         }
 

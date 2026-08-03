@@ -42,6 +42,8 @@ class FincaraizController extends Controller
             'contact_whatsapp' => $settings['contact_whatsapp'] ?? null,
             'show_exact_address' => (bool) ($settings['show_exact_address'] ?? false),
             'dual_offer' => $settings['dual_offer'] ?? 'sale',
+            'auto_sync' => (bool) ($settings['auto_sync'] ?? false),
+            'auto_sync_limit' => (int) ($settings['auto_sync_limit'] ?? 20),
             'api_key_source' => $this->userCredential($request)?->access_token ? 'panel' : 'environment',
             'webhook_configured' => ! empty(config('portals.fincaraiz.webhook_id'))
                 && ! empty(config('portals.fincaraiz.webhook_verify_token')),
@@ -59,6 +61,8 @@ class FincaraizController extends Controller
             'contact_whatsapp' => ['nullable', 'string', 'max:40'],
             'show_exact_address' => ['required', 'boolean'],
             'dual_offer' => ['required', 'in:sale,rent'],
+            'auto_sync' => ['sometimes', 'boolean'],
+            'auto_sync_limit' => ['sometimes', 'integer', 'min:1', 'max:100'],
         ]);
         $existing = $this->userCredential($request);
         $apiKey = trim((string) ($data['api_key'] ?? ''));
@@ -529,6 +533,8 @@ class FincaraizController extends Controller
             'contact_whatsapp' => config('portals.fincaraiz.contact_whatsapp'),
             'show_exact_address' => config('portals.fincaraiz.show_exact_address', false),
             'dual_offer' => config('portals.fincaraiz.dual_offer', 'sale'),
+            'auto_sync' => config('portals.fincaraiz.auto_sync', false),
+            'auto_sync_limit' => config('portals.fincaraiz.auto_sync_limit', 20),
         ], array_filter($data, fn ($value) => $value !== null && $value !== ''));
     }
 

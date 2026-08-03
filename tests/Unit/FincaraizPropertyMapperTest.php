@@ -18,6 +18,28 @@ use Tests\TestCase;
 
 class FincaraizPropertyMapperTest extends TestCase
 {
+    public function test_wordpress_labels_are_normalized_before_mapping(): void
+    {
+        $mapper = new class extends FincaraizPropertyMapper
+        {
+            public function exposedTransactionSlug(?string $value): string
+            {
+                return $this->transactionSlug($value);
+            }
+
+            public function exposedLocalStatus(?string $value): string
+            {
+                return $this->localStatus($value);
+            }
+        };
+
+        $this->assertSame('rent', $mapper->exposedTransactionSlug('Arriendo'));
+        $this->assertSame('sale', $mapper->exposedTransactionSlug('Venta'));
+        $this->assertSame('sale_rent', $mapper->exposedTransactionSlug('Arriendo / Venta'));
+        $this->assertSame('active', $mapper->exposedLocalStatus('Publico'));
+        $this->assertSame('draft', $mapper->exposedLocalStatus('En borrador'));
+    }
+
     public function test_wordpress_lookup_normalizes_whitespace_in_property_codes(): void
     {
         config()->set('sources.properties', 'wordpress');

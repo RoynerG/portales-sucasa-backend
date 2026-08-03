@@ -642,7 +642,7 @@ class FincaraizPropertyMapper
 
     protected function normalize(?string $value): string
     {
-        return strtolower(trim(preg_replace('/[^a-z0-9]+/', ' ', Str::ascii((string) $value))));
+        return trim(preg_replace('/[^a-z0-9]+/', ' ', strtolower(Str::ascii((string) $value))));
     }
 
     protected function text($value): string

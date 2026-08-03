@@ -54,13 +54,14 @@ class FincaraizListingRetirer
                 ];
             }
             if ($matches->count() !== 1) {
-                $listingIds = $matches
+                $rawListingIds = $matches
                     ->pluck('id')
-                    ->map(fn ($id) => trim((string) $id))
-                    ->filter(fn (string $id) => Str::isUuid($id))
+                    ->map(fn ($id) => trim((string) $id));
+                $allListingIdsAreValid = $rawListingIds
+                    ->every(fn (string $id) => Str::isUuid($id));
+                $listingIds = $rawListingIds
                     ->unique()
                     ->values();
-                $allListingIdsAreValid = $listingIds->count() === $matches->count();
 
                 return $row + [
                     'state' => $isPublic ? 'protected_unlinked' : 'ambiguous',

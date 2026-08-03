@@ -118,6 +118,7 @@ class FincaraizListingRetirerTest extends TestCase
             'data' => [
                 'results' => [
                     ['id' => '11111111-1111-4111-8111-111111111111', 'frPropertyId' => '9001', 'status' => 4],
+                    ['id' => '11111111-1111-4111-8111-111111111111', 'frPropertyId' => '9001', 'status' => 4],
                     ['id' => '22222222-2222-4222-8222-222222222222', 'frPropertyId' => '9001', 'status' => 4],
                 ],
                 'next' => null,

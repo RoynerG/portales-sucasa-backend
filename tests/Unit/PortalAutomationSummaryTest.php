@@ -20,11 +20,14 @@ class PortalAutomationSummaryTest extends TestCase
             $this->item('ciencuadras', '200'),
             $this->item('proppit', '100'),
             $this->item('proppit', '300'),
+            $this->item('ciencuadras', '200', 'not_synced'),
+            $this->item('ciencuadras', '400', 'not_synced'),
         ]);
 
         $summary = $this->summary($controller, $items, 'all');
 
         $this->assertSame(3, $summary['synced']);
+        $this->assertSame(1, $summary['not_synced']);
     }
 
     public function test_it_uses_ciencuadras_inventory_when_that_portal_is_selected(): void
@@ -48,11 +51,11 @@ class PortalAutomationSummaryTest extends TestCase
         return $method->invoke($controller, $items, $portal);
     }
 
-    private function item(string $portal, string $code): array
+    private function item(string $portal, string $code, string $status = 'synced'): array
     {
         return [
             'portal' => $portal,
-            'sync_status' => 'synced',
+            'sync_status' => $status,
             'action' => 'publish',
             'last_attempt_at' => null,
             'property' => ['code' => $code],

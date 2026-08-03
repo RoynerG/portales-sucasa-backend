@@ -178,7 +178,7 @@ class PortalAutomationController extends Controller
             ->unique()
             ->values();
         $localSynced = $localSyncedCodes->count();
-        $synced = $localSynced;
+        $publishedCodes = $localSyncedCodes;
         $portalActive = null;
         $unconfirmed = 0;
 
@@ -196,21 +196,31 @@ class PortalAutomationController extends Controller
                     ->where('portal', '!=', 'ciencuadras')
                     ->pluck('property.code')
                     ->filter();
-                $synced = $portal === 'ciencuadras'
-                    ? $portalActive
-                    : $activeCodes->merge($otherPortalCodes)->unique()->count();
+                $publishedCodes = $portal === 'ciencuadras'
+                    ? $activeCodes
+                    : $activeCodes->merge($otherPortalCodes)->unique()->values();
                 $unconfirmed = $ciencuadrasLocalCodes->diff($activeCodes)->count();
             }
+        }
+
+        $notSyncedCodes = $items
+            ->where('sync_status', 'not_synced')
+            ->pluck('property.code')
+            ->filter()
+            ->unique();
+
+        if ($portalActive !== null) {
+            $notSyncedCodes = $notSyncedCodes->diff($publishedCodes);
         }
 
         return [
             'total' => $items->count(),
             'active' => $items->whereIn('sync_status', ['pending', 'syncing'])->count(),
-            'synced' => $synced,
+            'synced' => $publishedCodes->count(),
             'synced_local' => $localSynced,
             'portal_active' => $portalActive,
             'unconfirmed' => $unconfirmed,
-            'not_synced' => $items->where('sync_status', 'not_synced')->pluck('property.code')->filter()->unique()->count(),
+            'not_synced' => $notSyncedCodes->count(),
             'paused' => $items->where('sync_status', 'paused')->count(),
             'error' => $items->where('sync_status', 'error')->count(),
             'publish' => $items->where('action', 'publish')->count(),

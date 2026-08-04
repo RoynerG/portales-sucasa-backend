@@ -16,6 +16,7 @@ use App\Http\Controllers\Portal\PortalAutomationController;
 use App\Http\Controllers\Portal\PortalBulkController;
 use App\Http\Controllers\Portal\PortalCatalogAuditController;
 use App\Http\Controllers\Portal\PortalErrorController;
+use App\Http\Controllers\Portal\PortalRecoveryController;
 use App\Http\Controllers\Portal\PortalResetController;
 use App\Http\Controllers\Portal\ProppitController;
 use Illuminate\Support\Facades\Route;
@@ -96,6 +97,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/automation/catalog-audit', [PortalCatalogAuditController::class, 'index']);
         Route::post('/automation/catalog-audit/{portal}', [PortalCatalogAuditController::class, 'verify']);
         Route::get('/errors', [PortalErrorController::class, 'index']);
+        Route::post('/recovery/{portal}', [PortalRecoveryController::class, 'recover']);
         Route::get('/{portal}/bulk-candidates', [PortalBulkController::class, 'candidates']);
         Route::get('/properties/{code}/fincaraiz/payload', [FincaraizController::class, 'payload']);
         Route::patch('/properties/{code}/fincaraiz/location', [FincaraizController::class, 'saveLocation']);

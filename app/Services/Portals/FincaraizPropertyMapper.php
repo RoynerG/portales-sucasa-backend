@@ -94,10 +94,10 @@ class FincaraizPropertyMapper
             'contact_phone' => config('portals.fincaraiz.contact_phone'),
             'contact_whatsapp' => config('portals.fincaraiz.contact_whatsapp'),
             'show_exact_address' => config('portals.fincaraiz.show_exact_address', false),
-            'dual_offer' => config('portals.fincaraiz.dual_offer', 'sale'),
+            'dual_offer' => config('portals.fincaraiz.dual_offer', 'rent'),
         ], array_filter($settings, fn ($value) => $value !== null && $value !== ''));
 
-        $offer = $this->offer($property, $settings);
+        $offer = $this->offer($property);
         $price = $offer === 'rent' || $offer === 'lease'
             ? (float) ($property->rent_price ?? 0)
             : (float) ($property->sale_price ?? 0);
@@ -394,14 +394,12 @@ class FincaraizPropertyMapper
         return Str::isUuid((string) $externalId) ? (string) $externalId : null;
     }
 
-    protected function offer(Property $property, array $settings): string
+    protected function offer(Property $property): string
     {
         $slug = $this->normalize($property->transactionType?->slug ?? $property->transactionType?->name);
         if ((str_contains($slug, 'venta') || str_contains($slug, 'sale'))
             && (str_contains($slug, 'arriendo') || str_contains($slug, 'rent'))) {
-            $preferred = strtolower((string) ($settings['dual_offer'] ?? 'sale'));
-
-            return $preferred === 'rent' && (float) $property->rent_price > 0 ? 'rent' : 'sell';
+            return 'rent';
         }
         if (str_contains($slug, 'vacacional') || str_contains($slug, 'lease')) {
             return 'lease';

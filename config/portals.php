@@ -34,7 +34,7 @@ return [
         'contact_phone' => env('FINCARAIZ_CONTACT_PHONE'),
         'contact_whatsapp' => env('FINCARAIZ_CONTACT_WHATSAPP'),
         'show_exact_address' => env('FINCARAIZ_SHOW_EXACT_ADDRESS', false),
-        'dual_offer' => env('FINCARAIZ_DUAL_OFFER', 'sale'),
+        'dual_offer' => env('FINCARAIZ_DUAL_OFFER', 'rent'),
         'cache_buster_name' => env('FINCARAIZ_CACHE_BUSTER_NAME', 'sucasa-cache'),
         'webhook_id' => env('FINCARAIZ_WEBHOOK_ID'),
         'webhook_verify_token' => env('FINCARAIZ_WEBHOOK_VERIFY_TOKEN'),

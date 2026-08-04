@@ -52,7 +52,7 @@ class FincaraizSettingsTest extends TestCase
             'contact_phone' => '3001234567',
             'contact_whatsapp' => '3001234567',
             'show_exact_address' => false,
-            'dual_offer' => 'sale',
+            'dual_offer' => 'rent',
         ]);
         $request->setUserResolver(fn () => $user);
 
@@ -70,5 +70,6 @@ class FincaraizSettingsTest extends TestCase
         $this->assertTrue($data['configured']);
         $this->assertArrayNotHasKey('api_key', $data);
         $this->assertSame(1234, $data['client_agent']);
+        $this->assertSame('rent', $data['dual_offer']);
     }
 }

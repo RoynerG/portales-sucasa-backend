@@ -41,7 +41,7 @@ class FincaraizController extends Controller
             'contact_phone' => $settings['contact_phone'] ?? null,
             'contact_whatsapp' => $settings['contact_whatsapp'] ?? null,
             'show_exact_address' => (bool) ($settings['show_exact_address'] ?? false),
-            'dual_offer' => $settings['dual_offer'] ?? 'sale',
+            'dual_offer' => 'rent',
             'auto_sync' => (bool) ($settings['auto_sync'] ?? false),
             'auto_sync_limit' => (int) ($settings['auto_sync_limit'] ?? 20),
             'api_key_source' => $this->userCredential($request)?->access_token ? 'panel' : 'environment',
@@ -536,10 +536,12 @@ class FincaraizController extends Controller
             'contact_phone' => config('portals.fincaraiz.contact_phone'),
             'contact_whatsapp' => config('portals.fincaraiz.contact_whatsapp'),
             'show_exact_address' => config('portals.fincaraiz.show_exact_address', false),
-            'dual_offer' => config('portals.fincaraiz.dual_offer', 'sale'),
+            'dual_offer' => config('portals.fincaraiz.dual_offer', 'rent'),
             'auto_sync' => config('portals.fincaraiz.auto_sync', false),
             'auto_sync_limit' => config('portals.fincaraiz.auto_sync_limit', 20),
-        ], array_filter($data, fn ($value) => $value !== null && $value !== ''));
+        ], array_filter($data, fn ($value) => $value !== null && $value !== ''), [
+            'dual_offer' => 'rent',
+        ]);
     }
 
     protected function userCredential(Request $request): ?PortalCredential

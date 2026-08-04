@@ -159,6 +159,34 @@ class FincaraizPropertyMapperTest extends TestCase
         $this->assertStringContainsString('latitud', strtolower(implode(' ', $mapped['errors'])));
     }
 
+    public function test_sale_and_rent_properties_are_always_sent_as_rent(): void
+    {
+        $property = new Property([
+            'code' => 'DUAL-1',
+            'title' => 'Casa en arriendo y venta',
+            'description' => 'Casa disponible para arriendo y venta con espacios amplios.',
+            'address' => 'Calle 10 # 20-30',
+            'sale_price' => 450000000,
+            'rent_price' => 3500000,
+            'area_built' => 120,
+            'lat' => 10.4,
+            'lng' => -75.5,
+        ]);
+        $property->setRelation('propertyType', new PropertyType(['slug' => 'casa']));
+        $property->setRelation('transactionType', new TransactionType(['slug' => 'sale_rent', 'name' => 'Arriendo/Venta']));
+        $property->setRelation('neighborhood', null);
+        $property->setRelation('images', new Collection);
+        $property->setRelation('videos', new Collection);
+        $property->setRelation('features', new Collection);
+
+        $mapped = (new FincaraizPropertyMapper)->mapProperty($property, [
+            'dual_offer' => 'sale',
+        ]);
+
+        $this->assertSame('rent', $mapped['payload']['offer']);
+        $this->assertSame(3500000.0, $mapped['payload']['price']);
+    }
+
     public function test_it_saves_the_official_location_for_the_local_neighborhood(): void
     {
         Schema::dropIfExists('portal_mappings');

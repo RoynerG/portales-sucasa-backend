@@ -209,6 +209,21 @@ class PortalCatalogAuditService
         $usedQuota = $quota['used'] ?? null;
         $officialExport = $this->fincaraizExport($credential, $userId, $clientId);
         $officialCodes = $this->normalizeCodes(collect(data_get($officialExport, 'codes', [])));
+        if (is_array($officialExport) && $officialCodes->isNotEmpty()) {
+            $reconciledCodes = $this->normalizeCodes(
+                $officialCodes
+                    ->diff($this->pausedRegistryCodes($integration, config('portals.fincaraiz.environment')))
+                    ->merge($apiRemoteCodes)
+            );
+            if (($usedQuota === null || $reconciledCodes->count() === $usedQuota)
+                && $reconciledCodes->all() !== $officialCodes->all()) {
+                $officialExport['active_count'] = $reconciledCodes->count();
+                $officialExport['codes'] = $reconciledCodes->all();
+                $officialExport['reconciled_at'] = now()->toIso8601String();
+                $this->persistFincaraizExport($credential, $userId, $clientId, $officialExport);
+                $officialCodes = $reconciledCodes;
+            }
+        }
         $officialMatchesQuota = is_array($officialExport)
             && $officialCodes->isNotEmpty()
             && ($usedQuota === null || $officialCodes->count() === $usedQuota);
@@ -447,6 +462,25 @@ class PortalCatalogAuditService
             ->mapWithKeys(fn (PropertySyncStatus $status) => [
                 trim((string) $status->external_id) => trim((string) $status->property->code),
             ]);
+    }
+
+    protected function pausedRegistryCodes(Integration $integration, ?string $environment): Collection
+    {
+        if (! $integration->exists) {
+            return collect();
+        }
+
+        return PropertySyncStatus::query()
+            ->where('integration_id', $integration->id)
+            ->when($environment, fn ($query) => $query->where('environment', $environment))
+            ->where('sync_status', 'paused')
+            ->with('property:id,code')
+            ->get()
+            ->pluck('property.code')
+            ->filter()
+            ->map(fn ($code) => trim((string) $code))
+            ->unique()
+            ->values();
     }
 
     protected function codesFromRemoteRows(Collection $rows, Collection $references): array

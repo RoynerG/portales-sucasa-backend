@@ -236,6 +236,61 @@ class PortalCatalogAuditServiceTest extends TestCase
         $this->assertSame(['100', '200', '300'], Cache::get($key)['codes']);
     }
 
+    public function test_fincaraiz_audit_keeps_unique_official_codes_when_quota_includes_a_duplicate_listing(): void
+    {
+        config()->set('portals.fincaraiz.api_key', 'test-key');
+        config()->set('portals.fincaraiz.client_id', 'test-client');
+        config()->set('portals.fincaraiz.environment', 'production');
+
+        $fincaraiz = Mockery::mock(FincaraizClient::class);
+        $fincaraiz->shouldReceive('getClients')->once()->andReturn([
+            'ok' => true,
+            'data' => [[
+                'id' => 'test-client',
+                'initial_quota' => 700,
+                'used_quota' => 3,
+                'remained_quota' => 697,
+                'percentage_used_quota' => 0.4,
+            ]],
+        ]);
+        $fincaraiz->shouldReceive('listListings')->once()->andReturn([
+            'ok' => true,
+            'data' => [
+                'results' => [
+                    ['id' => 'listing-1', 'status' => 4, 'external_code' => '100'],
+                    ['id' => 'listing-duplicate', 'status' => 4, 'external_code' => '100'],
+                ],
+                'count' => 2,
+                'next' => null,
+            ],
+        ]);
+
+        $service = new class(Mockery::mock(WordPressPropertyRepository::class), Mockery::mock(CiencuadrasActiveProperties::class), $fincaraiz, Mockery::mock(MercadoLibreClient::class), Mockery::mock(ProppitClient::class)) extends PortalCatalogAuditService
+        {
+            protected function registryReferences(Integration $integration, ?string $environment): Collection
+            {
+                return collect();
+            }
+        };
+
+        $keyMethod = new ReflectionMethod($service, 'fincaraizExportKey');
+        Cache::put($keyMethod->invoke($service, null, 'test-client'), [
+            'filename' => 'Exportable.xlsx',
+            'codes' => ['100', '200'],
+            'property_ids_count' => 2,
+            'imported_at' => now()->toIso8601String(),
+        ], now()->addMinute());
+
+        $integration = new Integration(['name' => 'Fincaraíz', 'slug' => 'fincaraiz', 'icon' => 'fa-house']);
+        $method = new ReflectionMethod($service, 'auditFincaraiz');
+        $result = $method->invoke($service, $integration, collect(['100', '200']), null);
+
+        $this->assertSame(2, $result['remote_active']);
+        $this->assertSame(2, $result['matched']);
+        $this->assertSame('office_export', $result['inventory']['source']);
+        $this->assertFalse($result['official_export']['matches_quota']);
+    }
+
     public function test_fincaraiz_audit_migrates_the_temporary_export_to_the_credential(): void
     {
         Schema::dropIfExists('portal_credentials');

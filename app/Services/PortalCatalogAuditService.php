@@ -212,11 +212,10 @@ class PortalCatalogAuditService
         if (is_array($officialExport) && $officialCodes->isNotEmpty()) {
             $reconciledCodes = $this->normalizeCodes(
                 $officialCodes
-                    ->diff($this->pausedRegistryCodes($integration, config('portals.fincaraiz.environment')))
                     ->merge($apiRemoteCodes)
+                    ->diff($this->pausedRegistryCodes($integration, config('portals.fincaraiz.environment')))
             );
-            if (($usedQuota === null || $reconciledCodes->count() === $usedQuota)
-                && $reconciledCodes->all() !== $officialCodes->all()) {
+            if ($reconciledCodes->all() !== $officialCodes->all()) {
                 $officialExport['active_count'] = $reconciledCodes->count();
                 $officialExport['codes'] = $reconciledCodes->all();
                 $officialExport['reconciled_at'] = now()->toIso8601String();
@@ -224,15 +223,15 @@ class PortalCatalogAuditService
                 $officialCodes = $reconciledCodes;
             }
         }
-        $officialMatchesQuota = is_array($officialExport)
-            && $officialCodes->isNotEmpty()
+        $officialAvailable = is_array($officialExport) && $officialCodes->isNotEmpty();
+        $officialMatchesQuota = $officialAvailable
             && ($usedQuota === null || $officialCodes->count() === $usedQuota);
-        $remoteCodes = $officialMatchesQuota ? $officialCodes : $apiRemoteCodes;
-        $coverage = $officialMatchesQuota
-            ? 'Exportable oficial de la Oficina Virtual'
+        $remoteCodes = $officialAvailable ? $officialCodes : $apiRemoteCodes;
+        $coverage = $officialAvailable
+            ? 'Catálogo oficial consolidado de Fincaraíz'
             : 'Inventario activo disponible en GET /listing';
-        $note = $officialMatchesQuota
-            ? 'Se usan únicamente los códigos únicos con Estado Activo del exportable oficial; GET /listing se conserva como diagnóstico técnico.'
+        $note = $officialAvailable
+            ? 'Se conserva el cruce oficial de códigos y se actualiza con los cambios visibles en la API. Los cupos usados pueden incluir varios avisos para un mismo código.'
             : 'GET /listing no siempre coincide con los cupos usados. Carga un exportable oficial actualizado para auditar todos los códigos activos.';
 
         $result = $this->comparisonResult(
@@ -242,7 +241,7 @@ class PortalCatalogAuditService
             $references->values()->unique(),
             $coverage,
             $note,
-            $officialMatchesQuota ? collect() : $unknownRemote
+            $officialAvailable ? collect() : $unknownRemote
         );
 
         $activeStatusFour = $activeRows->count();
@@ -262,7 +261,7 @@ class PortalCatalogAuditService
             'duplicate_codes' => $repeatedGroups->count(),
             'unlinked_active' => $unknownRemote->count(),
             'status_counts' => $statusCounts,
-            'source' => $officialMatchesQuota ? 'office_export' : 'listing_api',
+            'source' => $officialAvailable ? 'office_export' : 'listing_api',
         ];
         $result['official_export'] = is_array($officialExport) ? [
             'filename' => data_get($officialExport, 'filename'),

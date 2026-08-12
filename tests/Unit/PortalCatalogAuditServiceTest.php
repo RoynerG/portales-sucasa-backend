@@ -52,6 +52,19 @@ class PortalCatalogAuditServiceTest extends TestCase
         config()->set('portals.fincaraiz.environment', 'production');
 
         $fincaraiz = Mockery::mock(FincaraizClient::class);
+        $fincaraiz->shouldReceive('getClients')
+            ->once()
+            ->with('test-key')
+            ->andReturn([
+                'ok' => true,
+                'data' => [[
+                    'id' => 'test-client',
+                    'initial_quota' => 700,
+                    'used_quota' => 2,
+                    'remained_quota' => 698,
+                    'percentage_used_quota' => 0.3,
+                ]],
+            ]);
         $fincaraiz->shouldReceive('listListings')
             ->once()
             ->with('test-key', 'test-client', 1, 100)
@@ -85,5 +98,14 @@ class PortalCatalogAuditServiceTest extends TestCase
         $this->assertSame(1, $result['remote_active']);
         $this->assertSame(1, $result['matched']);
         $this->assertSame([], $result['details']['unknown_remote']);
+        $this->assertSame([
+            'initial' => 700,
+            'used' => 2,
+            'remaining' => 698,
+            'percentage_used' => 0.3,
+        ], $result['quota']);
+        $this->assertSame(4, $result['inventory']['total']);
+        $this->assertSame(['2' => 1, '4' => 1], $result['inventory']['status_counts']);
+        $this->assertSame(1, $result['quota_discrepancy']['difference']);
     }
 }

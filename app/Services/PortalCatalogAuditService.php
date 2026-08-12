@@ -97,7 +97,24 @@ class PortalCatalogAuditService
             return $this->unavailableResult($integration, $localCodes, 'Falta configurar la API key o el Client ID de Fincaraíz.');
         }
 
+        $clientResponse = $this->fincaraiz->getClients($apiKey);
+        $client = collect(($clientResponse['ok'] ?? false) ? data_get($clientResponse, 'data', []) : [])
+            ->filter(fn ($item) => is_array($item))
+            ->first(fn (array $item) => trim((string) ($item['id'] ?? '')) === $clientId);
+        $quota = $client ? [
+            'initial' => is_numeric($client['initial_quota'] ?? null) ? (int) $client['initial_quota'] : null,
+            'used' => is_numeric($client['used_quota'] ?? null) ? (int) $client['used_quota'] : null,
+            'remaining' => is_numeric($client['remained_quota'] ?? null) ? (int) $client['remained_quota'] : null,
+            'percentage_used' => is_numeric($client['percentage_used_quota'] ?? null) ? (float) $client['percentage_used_quota'] : null,
+        ] : null;
+        $quotaError = $quota ? null : (string) (
+            data_get($clientResponse, 'data.detail')
+            ?: data_get($clientResponse, 'data.error')
+            ?: 'GET /client no devolvió el cliente configurado.'
+        );
+
         $rows = collect();
+        $inventoryTotal = 0;
         for ($page = 1; $page <= 100; $page++) {
             $response = $this->fincaraiz->listListings($apiKey, $clientId, $page, 100);
             if (! ($response['ok'] ?? false)) {
@@ -108,16 +125,21 @@ class PortalCatalogAuditService
                 ->values();
             $rows = $rows->concat($pageRows);
             $total = (int) data_get($response, 'data.count', $rows->count());
+            $inventoryTotal = max($inventoryTotal, $total);
             if ($pageRows->isEmpty() || $rows->count() >= $total || ! data_get($response, 'data.next')) {
                 break;
             }
         }
 
         $activeRows = $rows->filter(fn (array $listing) => (int) ($listing['status'] ?? -1) === 4)->values();
+        $statusCounts = $rows
+            ->countBy(fn (array $listing) => (string) (int) ($listing['status'] ?? -1))
+            ->sortKeys()
+            ->all();
         $references = $this->registryReferences($integration, config('portals.fincaraiz.environment'));
         [$remoteCodes, $unknownRemote] = $this->codesFromRemoteRows($activeRows, $references);
 
-        return $this->comparisonResult(
+        $result = $this->comparisonResult(
             $integration,
             $localCodes,
             $remoteCodes,
@@ -126,6 +148,27 @@ class PortalCatalogAuditService
             'Solo se consideran activos los avisos con estado 4 en Fincaraíz.',
             $unknownRemote
         );
+
+        $usedQuota = $quota['used'] ?? null;
+        $activeStatusFour = $activeRows->count();
+        $quotaDifference = $usedQuota === null ? null : $usedQuota - $activeStatusFour;
+
+        $result['quota'] = $quota;
+        $result['quota_error'] = $quotaError;
+        $result['inventory'] = [
+            'total' => max($inventoryTotal, $rows->count()),
+            'loaded' => $rows->count(),
+            'active_status' => 4,
+            'active_status_count' => $activeStatusFour,
+            'status_counts' => $statusCounts,
+        ];
+        $result['quota_discrepancy'] = $quotaDifference === null ? null : [
+            'has_difference' => $quotaDifference !== 0,
+            'difference' => $quotaDifference,
+            'absolute_difference' => abs($quotaDifference),
+        ];
+
+        return $result;
     }
 
     protected function auditMercadoLibre(Integration $integration, Collection $localCodes): array

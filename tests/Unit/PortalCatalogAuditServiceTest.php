@@ -73,11 +73,12 @@ class PortalCatalogAuditServiceTest extends TestCase
                 'data' => [
                     'results' => [
                         ['id' => 'listing-1', 'status' => 4, 'external_code' => '100'],
+                        ['id' => 'listing-duplicate', 'status' => 4, 'external_code' => '100'],
                         null,
                         'invalid-row',
                         ['id' => 'listing-2', 'status' => 2, 'external_code' => '200'],
                     ],
-                    'count' => 4,
+                    'count' => 5,
                     'next' => null,
                 ],
             ]);
@@ -104,8 +105,12 @@ class PortalCatalogAuditServiceTest extends TestCase
             'remaining' => 698,
             'percentage_used' => 0.3,
         ], $result['quota']);
-        $this->assertSame(4, $result['inventory']['total']);
-        $this->assertSame(['2' => 1, '4' => 1], $result['inventory']['status_counts']);
-        $this->assertSame(1, $result['quota_discrepancy']['difference']);
+        $this->assertSame(5, $result['inventory']['total']);
+        $this->assertSame(['2' => 1, '4' => 2], $result['inventory']['status_counts']);
+        $this->assertSame(1, $result['inventory']['duplicate_active']);
+        $this->assertSame(1, $result['inventory']['duplicate_codes']);
+        $this->assertSame(0, $result['inventory']['unlinked_active']);
+        $this->assertSame(['100 · listing_id listing-duplicate'], $result['details']['duplicate_active']);
+        $this->assertSame(0, $result['quota_discrepancy']['difference']);
     }
 }

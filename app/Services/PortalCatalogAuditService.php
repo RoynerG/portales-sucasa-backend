@@ -138,6 +138,22 @@ class PortalCatalogAuditService
             ->all();
         $references = $this->registryReferences($integration, config('portals.fincaraiz.environment'));
         [$remoteCodes, $unknownRemote] = $this->codesFromRemoteRows($activeRows, $references);
+        $activeRowsByCode = $activeRows
+            ->map(fn (array $listing) => [
+                'code' => $this->codeFromRemoteRow($listing, $references),
+                'listing_id' => trim((string) ($listing['id'] ?? '')),
+            ])
+            ->filter(fn (array $listing) => $listing['code'] !== null)
+            ->groupBy('code');
+        $duplicateGroups = $activeRowsByCode
+            ->filter(fn (Collection $listings) => $listings->count() > 1);
+        $duplicateActive = $duplicateGroups
+            ->sum(fn (Collection $listings) => $listings->count() - 1);
+        $duplicateDetails = $duplicateGroups
+            ->flatMap(fn (Collection $listings, $code) => $listings->slice(1)->map(
+                fn (array $listing) => trim((string) $code).' · listing_id '.($listing['listing_id'] ?: 'no informado')
+            ))
+            ->values();
 
         $result = $this->comparisonResult(
             $integration,
@@ -160,8 +176,14 @@ class PortalCatalogAuditService
             'loaded' => $rows->count(),
             'active_status' => 4,
             'active_status_count' => $activeStatusFour,
+            'unique_active_codes' => $remoteCodes->count(),
+            'duplicate_active' => $duplicateActive,
+            'duplicate_codes' => $duplicateGroups->count(),
+            'unlinked_active' => $unknownRemote->count(),
             'status_counts' => $statusCounts,
         ];
+        $result['duplicate_active'] = $duplicateActive;
+        $result['details']['duplicate_active'] = $duplicateDetails->take(250)->all();
         $result['quota_discrepancy'] = $quotaDifference === null ? null : [
             'has_difference' => $quotaDifference !== 0,
             'difference' => $quotaDifference,
@@ -358,19 +380,29 @@ class PortalCatalogAuditService
 
         foreach ($rows as $row) {
             $id = trim((string) ($row['id'] ?? ''));
-            $code = $row['external_code']
-                ?? $row['externalCode']
-                ?? $row['integrator_code']
-                ?? $row['integratorCode']
-                ?? $references->get($id);
-            if (is_scalar($code) && trim((string) $code) !== '') {
-                $codes->push(trim((string) $code));
+            $code = $this->codeFromRemoteRow($row, $references);
+            if ($code !== null) {
+                $codes->push($code);
             } elseif ($id !== '') {
                 $unknown->push($id);
             }
         }
 
         return [$codes->unique()->values(), $unknown->unique()->values()];
+    }
+
+    protected function codeFromRemoteRow(array $row, Collection $references): ?string
+    {
+        $id = trim((string) ($row['id'] ?? ''));
+        $code = $row['external_code']
+            ?? $row['externalCode']
+            ?? $row['integrator_code']
+            ?? $row['integratorCode']
+            ?? $references->get($id);
+
+        return is_scalar($code) && trim((string) $code) !== ''
+            ? trim((string) $code)
+            : null;
     }
 
     protected function remoteRecordIsActive(array $data): bool

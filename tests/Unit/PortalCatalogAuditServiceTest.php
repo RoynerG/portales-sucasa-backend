@@ -3,14 +3,17 @@
 namespace Tests\Unit;
 
 use App\Models\Integration;
+use App\Models\PortalCredential;
 use App\Services\PortalCatalogAuditService;
 use App\Services\Portals\CiencuadrasActiveProperties;
 use App\Services\Portals\FincaraizClient;
 use App\Services\Portals\MercadoLibreClient;
 use App\Services\Portals\ProppitClient;
 use App\Services\WordPressPropertyRepository;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 use Mockery;
 use ReflectionMethod;
 use Tests\TestCase;
@@ -170,5 +173,55 @@ class PortalCatalogAuditServiceTest extends TestCase
         $this->assertSame(1, $result['inventory']['unique_active_codes']);
         $this->assertTrue($result['official_export']['matches_quota']);
         $this->assertSame(2, $result['official_export']['active_count']);
+    }
+
+    public function test_fincaraiz_audit_migrates_the_temporary_export_to_the_credential(): void
+    {
+        Schema::dropIfExists('portal_credentials');
+        Schema::create('portal_credentials', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('user_id');
+            $table->unsignedBigInteger('integration_id');
+            $table->string('account_key')->nullable();
+            $table->text('access_token')->nullable();
+            $table->text('refresh_token')->nullable();
+            $table->timestamp('access_token_expires_at')->nullable();
+            $table->json('data')->nullable();
+            $table->timestamps();
+        });
+
+        $credential = PortalCredential::create([
+            'user_id' => 15,
+            'integration_id' => 8,
+            'data' => ['client_id' => 'test-client', 'dual_offer' => 'rent'],
+        ]);
+        $snapshot = [
+            'filename' => 'Exportable.xlsx',
+            'client_id' => 'test-client',
+            'environment' => 'production',
+            'active_count' => 2,
+            'codes' => ['100', '200'],
+            'property_ids_count' => 2,
+            'imported_at' => now()->toIso8601String(),
+        ];
+        config()->set('portals.fincaraiz.environment', 'production');
+
+        $service = new PortalCatalogAuditService(
+            Mockery::mock(WordPressPropertyRepository::class),
+            Mockery::mock(CiencuadrasActiveProperties::class),
+            Mockery::mock(FincaraizClient::class),
+            Mockery::mock(MercadoLibreClient::class),
+            Mockery::mock(ProppitClient::class),
+        );
+        $keyMethod = new ReflectionMethod($service, 'fincaraizExportKey');
+        Cache::put($keyMethod->invoke($service, 15, 'test-client'), $snapshot, now()->addMinute());
+
+        $method = new ReflectionMethod($service, 'fincaraizExport');
+        $result = $method->invoke($service, $credential, 15, 'test-client');
+        $storedData = $credential->fresh()->data;
+
+        $this->assertSame($snapshot, $result);
+        $this->assertSame('rent', $storedData['dual_offer']);
+        $this->assertSame($snapshot, $storedData['fincaraiz_catalog_snapshot']);
     }
 }

@@ -105,7 +105,7 @@ class PortalCatalogAuditService
             ]);
         }
 
-        Cache::put($this->fincaraizExportKey($userId, $clientId), [
+        $snapshot = [
             'filename' => trim((string) $filename),
             'client_id' => $clientId,
             'environment' => (string) config('portals.fincaraiz.environment', 'qa'),
@@ -113,7 +113,8 @@ class PortalCatalogAuditService
             'codes' => $codes->all(),
             'property_ids_count' => $propertyIds->count(),
             'imported_at' => now()->toIso8601String(),
-        ], now()->addDay());
+        ];
+        $this->persistFincaraizExport($credential, $userId, $clientId, $snapshot);
 
         return $this->audit('fincaraiz', $userId);
     }
@@ -206,7 +207,7 @@ class PortalCatalogAuditService
             ->values();
 
         $usedQuota = $quota['used'] ?? null;
-        $officialExport = Cache::get($this->fincaraizExportKey($userId, $clientId));
+        $officialExport = $this->fincaraizExport($credential, $userId, $clientId);
         $officialCodes = $this->normalizeCodes(collect(data_get($officialExport, 'codes', [])));
         $officialMatchesQuota = is_array($officialExport)
             && $officialCodes->isNotEmpty()
@@ -521,5 +522,49 @@ class PortalCatalogAuditService
             .($userId ?: 'shared').':'
             .(string) config('portals.fincaraiz.environment', 'qa').':'
             .hash('sha256', $clientId);
+    }
+
+    protected function fincaraizExport(
+        ?PortalCredential $credential,
+        ?int $userId,
+        string $clientId
+    ): ?array {
+        $stored = data_get($credential?->data, 'fincaraiz_catalog_snapshot');
+        if (is_array($stored)) {
+            return $stored;
+        }
+
+        $cached = Cache::get($this->fincaraizExportKey($userId, $clientId));
+        if (! is_array($cached)) {
+            return null;
+        }
+
+        // Migra automáticamente el cruce de 24 horas creado por versiones anteriores.
+        if ($credential) {
+            try {
+                $this->persistFincaraizExport($credential, $userId, $clientId, $cached);
+            } catch (Throwable $exception) {
+                report($exception);
+            }
+        } else {
+            Cache::forever($this->fincaraizExportKey($userId, $clientId), $cached);
+        }
+
+        return $cached;
+    }
+
+    protected function persistFincaraizExport(
+        ?PortalCredential $credential,
+        ?int $userId,
+        string $clientId,
+        array $snapshot
+    ): void {
+        if ($credential) {
+            $data = is_array($credential->data) ? $credential->data : [];
+            $data['fincaraiz_catalog_snapshot'] = $snapshot;
+            $credential->forceFill(['data' => $data])->save();
+        }
+
+        Cache::forever($this->fincaraizExportKey($userId, $clientId), $snapshot);
     }
 }

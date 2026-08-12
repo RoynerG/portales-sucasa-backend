@@ -69,11 +69,16 @@ class FincaraizController extends Controller
         abort_unless($apiKey !== '' || $existing?->access_token || config('portals.fincaraiz.api_key'), 422, 'Ingresa la API key de Fincaraíz.');
 
         $credential = $existing ?? new PortalCredential;
+        $existingData = is_array($existing?->data) ? $existing->data : [];
+        $settingsData = array_replace($existingData, Arr::except($data, ['api_key']));
+        if (trim((string) ($existingData['client_id'] ?? '')) !== trim((string) ($settingsData['client_id'] ?? ''))) {
+            unset($settingsData['fincaraiz_catalog_snapshot']);
+        }
         $credential->fill([
             'user_id' => $request->user()->id,
             'integration_id' => $this->integration()->id,
             'account_key' => 'user:'.$request->user()->id,
-            'data' => Arr::except($data, ['api_key']),
+            'data' => $settingsData,
         ]);
         if ($apiKey !== '') {
             $credential->access_token = $apiKey;

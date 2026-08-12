@@ -72,4 +72,43 @@ class FincaraizSettingsTest extends TestCase
         $this->assertSame(1234, $data['client_agent']);
         $this->assertSame('rent', $data['dual_offer']);
     }
+
+    public function test_saving_the_same_client_preserves_its_catalog_snapshot(): void
+    {
+        $clientId = 'df03d199-be5c-4c5c-98f6-849361cb7fae';
+        PortalCredential::create([
+            'user_id' => 15,
+            'integration_id' => 1,
+            'account_key' => 'user:15',
+            'access_token' => 'production-key',
+            'data' => [
+                'client_id' => $clientId,
+                'fincaraiz_catalog_snapshot' => ['codes' => ['100', '200']],
+            ],
+        ]);
+        $user = new User;
+        $user->id = 15;
+        $user->exists = true;
+        $request = Request::create('/api/portals/fincaraiz/settings', 'PATCH', [
+            'client_id' => $clientId,
+            'client_agent' => 1234,
+            'contact_email' => 'asesor@example.com',
+            'contact_phone' => '3001234567',
+            'contact_whatsapp' => '3001234567',
+            'show_exact_address' => false,
+            'dual_offer' => 'rent',
+        ]);
+        $request->setUserResolver(fn () => $user);
+
+        $controller = new FincaraizController(
+            $this->createMock(FincaraizClient::class),
+            $this->createMock(FincaraizPropertyMapper::class)
+        );
+        $controller->saveSettings($request);
+
+        $this->assertSame(
+            ['codes' => ['100', '200']],
+            PortalCredential::firstOrFail()->data['fincaraiz_catalog_snapshot']
+        );
+    }
 }

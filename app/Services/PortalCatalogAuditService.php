@@ -209,6 +209,32 @@ class PortalCatalogAuditService
         $usedQuota = $quota['used'] ?? null;
         $officialExport = $this->fincaraizExport($credential, $userId, $clientId);
         $officialCodes = $this->normalizeCodes(collect(data_get($officialExport, 'codes', [])));
+        if ($officialCodes->isEmpty()) {
+            $syncedRegistryCodes = $this->syncedRegistryCodes(
+                $integration,
+                config('portals.fincaraiz.environment')
+            );
+            $bootstrapCodes = $this->normalizeCodes($apiRemoteCodes->merge($syncedRegistryCodes));
+            $quotaGap = $usedQuota === null ? 0 : $usedQuota - $bootstrapCodes->count();
+            $canBootstrap = $syncedRegistryCodes->isNotEmpty()
+                && $bootstrapCodes->count() > $apiRemoteCodes->count()
+                && $quotaGap >= 0
+                && ($usedQuota === null || $quotaGap <= max(1, $repeatedApiRows));
+            if ($canBootstrap) {
+                $officialExport = [
+                    'filename' => 'Reconstruido desde referencias guardadas',
+                    'client_id' => $clientId,
+                    'environment' => (string) config('portals.fincaraiz.environment', 'qa'),
+                    'active_count' => $bootstrapCodes->count(),
+                    'codes' => $bootstrapCodes->all(),
+                    'property_ids_count' => $references->count(),
+                    'imported_at' => now()->toIso8601String(),
+                    'source' => 'synced_registry',
+                ];
+                $this->persistFincaraizExport($credential, $userId, $clientId, $officialExport);
+                $officialCodes = $bootstrapCodes;
+            }
+        }
         if (is_array($officialExport) && $officialCodes->isNotEmpty()) {
             $reconciledCodes = $this->normalizeCodes(
                 $officialCodes
@@ -473,6 +499,26 @@ class PortalCatalogAuditService
             ->where('integration_id', $integration->id)
             ->when($environment, fn ($query) => $query->where('environment', $environment))
             ->where('sync_status', 'paused')
+            ->with('property:id,code')
+            ->get()
+            ->pluck('property.code')
+            ->filter()
+            ->map(fn ($code) => trim((string) $code))
+            ->unique()
+            ->values();
+    }
+
+    protected function syncedRegistryCodes(Integration $integration, ?string $environment): Collection
+    {
+        if (! $integration->exists) {
+            return collect();
+        }
+
+        return PropertySyncStatus::query()
+            ->where('integration_id', $integration->id)
+            ->when($environment, fn ($query) => $query->where('environment', $environment))
+            ->where('sync_status', 'synced')
+            ->whereNotNull('external_id')
             ->with('property:id,code')
             ->get()
             ->pluck('property.code')

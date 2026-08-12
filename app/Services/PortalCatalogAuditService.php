@@ -615,7 +615,7 @@ class PortalCatalogAuditService
 
         $cached = Cache::get($this->fincaraizExportKey($userId, $clientId));
         if (! is_array($cached)) {
-            return null;
+            return $this->seededFincaraizExport($credential, $userId, $clientId);
         }
 
         // Migra automáticamente el cruce de 24 horas creado por versiones anteriores.
@@ -632,6 +632,34 @@ class PortalCatalogAuditService
         return $cached;
     }
 
+    protected function seededFincaraizExport(
+        ?PortalCredential $credential,
+        ?int $userId,
+        string $clientId
+    ): ?array {
+        if (! $credential || data_get($credential->data, 'fincaraiz_catalog_seed_2026_08_12_applied')) {
+            return null;
+        }
+
+        $path = resource_path('data/fincaraiz_catalog_snapshot_2026_08_12.json');
+        $seed = is_file($path) ? json_decode((string) file_get_contents($path), true) : null;
+        $codes = $this->normalizeCodes(collect(data_get($seed, 'codes', [])));
+        if (! is_array($seed)
+            || (int) data_get($seed, 'credential_id') !== (int) $credential->getKey()
+            || $codes->count() !== (int) data_get($seed, 'active_count')
+            || $codes->isEmpty()) {
+            return null;
+        }
+
+        unset($seed['credential_id']);
+        $seed['client_id'] = $clientId;
+        $seed['environment'] = (string) config('portals.fincaraiz.environment', 'qa');
+        $seed['codes'] = $codes->all();
+        $this->persistFincaraizExport($credential, $userId, $clientId, $seed);
+
+        return $seed;
+    }
+
     protected function persistFincaraizExport(
         ?PortalCredential $credential,
         ?int $userId,
@@ -641,6 +669,9 @@ class PortalCatalogAuditService
         if ($credential) {
             $data = is_array($credential->data) ? $credential->data : [];
             $data['fincaraiz_catalog_snapshot'] = $snapshot;
+            if (data_get($snapshot, 'source') === 'office_export_2026_08_12') {
+                $data['fincaraiz_catalog_seed_2026_08_12_applied'] = true;
+            }
             $credential->forceFill(['data' => $data])->save();
         }
 

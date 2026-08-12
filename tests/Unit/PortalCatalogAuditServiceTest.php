@@ -397,4 +397,42 @@ class PortalCatalogAuditServiceTest extends TestCase
         $this->assertSame('rent', $storedData['dual_offer']);
         $this->assertSame($snapshot, $storedData['fincaraiz_catalog_snapshot']);
     }
+
+    public function test_fincaraiz_audit_applies_the_bundled_export_only_to_its_original_credential(): void
+    {
+        Schema::dropIfExists('portal_credentials');
+        Schema::create('portal_credentials', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('user_id');
+            $table->unsignedBigInteger('integration_id');
+            $table->string('account_key')->nullable();
+            $table->text('access_token')->nullable();
+            $table->text('refresh_token')->nullable();
+            $table->timestamp('access_token_expires_at')->nullable();
+            $table->json('data')->nullable();
+            $table->timestamps();
+        });
+
+        $credential = PortalCredential::forceCreate([
+            'id' => 18,
+            'user_id' => 1,
+            'integration_id' => 8,
+            'data' => ['client_id' => 'production-client'],
+        ]);
+        $service = new PortalCatalogAuditService(
+            Mockery::mock(WordPressPropertyRepository::class),
+            Mockery::mock(CiencuadrasActiveProperties::class),
+            Mockery::mock(FincaraizClient::class),
+            Mockery::mock(MercadoLibreClient::class),
+            Mockery::mock(ProppitClient::class),
+        );
+        $method = new ReflectionMethod($service, 'seededFincaraizExport');
+        $snapshot = $method->invoke($service, $credential, 1, 'production-client');
+        $storedData = $credential->fresh()->data;
+
+        $this->assertSame(509, $snapshot['active_count']);
+        $this->assertCount(509, $snapshot['codes']);
+        $this->assertTrue($storedData['fincaraiz_catalog_seed_2026_08_12_applied']);
+        $this->assertSame($snapshot, $storedData['fincaraiz_catalog_snapshot']);
+    }
 }

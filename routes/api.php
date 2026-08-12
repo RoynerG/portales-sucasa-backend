@@ -96,6 +96,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/automation', [PortalAutomationController::class, 'index']);
         Route::get('/automation/catalog-audit', [PortalCatalogAuditController::class, 'index']);
         Route::post('/automation/catalog-audit/{portal}', [PortalCatalogAuditController::class, 'verify']);
+        Route::post('/automation/catalog-audit/fincaraiz/export', [PortalCatalogAuditController::class, 'importFincaraizExport']);
         Route::get('/errors', [PortalErrorController::class, 'index']);
         Route::post('/recovery/{portal}', [PortalRecoveryController::class, 'recover']);
         Route::get('/{portal}/bulk-candidates', [PortalBulkController::class, 'candidates']);

@@ -10,6 +10,7 @@ use App\Services\Portals\MercadoLibreClient;
 use App\Services\Portals\ProppitClient;
 use App\Services\WordPressPropertyRepository;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Mockery;
 use ReflectionMethod;
 use Tests\TestCase;
@@ -108,9 +109,66 @@ class PortalCatalogAuditServiceTest extends TestCase
         $this->assertSame(5, $result['inventory']['total']);
         $this->assertSame(['2' => 1, '4' => 2], $result['inventory']['status_counts']);
         $this->assertSame(1, $result['inventory']['duplicate_active']);
+        $this->assertSame(1, $result['inventory']['repeated_api_rows']);
+        $this->assertSame('listing_api', $result['inventory']['source']);
         $this->assertSame(1, $result['inventory']['duplicate_codes']);
         $this->assertSame(0, $result['inventory']['unlinked_active']);
         $this->assertSame(['100 · listing_id listing-duplicate'], $result['details']['duplicate_active']);
         $this->assertSame(0, $result['quota_discrepancy']['difference']);
+    }
+
+    public function test_fincaraiz_audit_uses_official_export_when_it_matches_used_quota(): void
+    {
+        config()->set('portals.fincaraiz.api_key', 'test-key');
+        config()->set('portals.fincaraiz.client_id', 'test-client');
+        config()->set('portals.fincaraiz.environment', 'production');
+
+        $fincaraiz = Mockery::mock(FincaraizClient::class);
+        $fincaraiz->shouldReceive('getClients')->once()->andReturn([
+            'ok' => true,
+            'data' => [[
+                'id' => 'test-client',
+                'initial_quota' => 700,
+                'used_quota' => 2,
+                'remained_quota' => 698,
+                'percentage_used_quota' => 0.3,
+            ]],
+        ]);
+        $fincaraiz->shouldReceive('listListings')->once()->andReturn([
+            'ok' => true,
+            'data' => [
+                'results' => [['id' => 'listing-1', 'status' => 4, 'external_code' => '100']],
+                'count' => 1,
+                'next' => null,
+            ],
+        ]);
+
+        $service = new class(Mockery::mock(WordPressPropertyRepository::class), Mockery::mock(CiencuadrasActiveProperties::class), $fincaraiz, Mockery::mock(MercadoLibreClient::class), Mockery::mock(ProppitClient::class)) extends PortalCatalogAuditService
+        {
+            protected function registryReferences(Integration $integration, ?string $environment): Collection
+            {
+                return collect();
+            }
+        };
+
+        $keyMethod = new ReflectionMethod($service, 'fincaraizExportKey');
+        Cache::put($keyMethod->invoke($service, null, 'test-client'), [
+            'filename' => 'Exportable.xlsx',
+            'codes' => ['100', '200'],
+            'property_ids_count' => 2,
+            'imported_at' => now()->toIso8601String(),
+        ], now()->addMinute());
+
+        $integration = new Integration(['name' => 'Fincaraíz', 'slug' => 'fincaraiz', 'icon' => 'fa-house']);
+        $method = new ReflectionMethod($service, 'auditFincaraiz');
+        $result = $method->invoke($service, $integration, collect(['100', '200']), null);
+
+        $this->assertSame(2, $result['remote_active']);
+        $this->assertSame(2, $result['matched']);
+        $this->assertSame(0, $result['missing']);
+        $this->assertSame('office_export', $result['inventory']['source']);
+        $this->assertSame(1, $result['inventory']['unique_active_codes']);
+        $this->assertTrue($result['official_export']['matches_quota']);
+        $this->assertSame(2, $result['official_export']['active_count']);
     }
 }

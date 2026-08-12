@@ -11,6 +11,8 @@ use App\Services\Portals\MercadoLibreClient;
 use App\Services\Portals\ProppitClient;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use RuntimeException;
 use Throwable;
 
@@ -66,6 +68,54 @@ class PortalCatalogAuditService
         Cache::put($this->cacheKey($portal, $userId), $result, now()->addDay());
 
         return $result;
+    }
+
+    public function importFincaraizExport(?int $userId, array $listings, ?string $filename = null): array
+    {
+        $integration = Integration::query()->active()->where('slug', 'fincaraiz')->firstOrFail();
+        $credential = $userId ? PortalCredential::query()->where([
+            'user_id' => $userId,
+            'integration_id' => $integration->id,
+        ])->first() : null;
+        $clientId = trim((string) (data_get($credential?->data, 'client_id') ?: config('portals.fincaraiz.client_id')));
+        if ($clientId === '') {
+            throw new RuntimeException('Falta configurar el Client ID de Fincaraíz.');
+        }
+
+        $rows = collect($listings)->map(fn (array $row) => [
+            'code' => trim((string) ($row['code'] ?? '')),
+            'fr_property_id' => trim((string) ($row['fr_property_id'] ?? '')),
+            'status' => strtolower(Str::ascii(trim((string) ($row['status'] ?? '')))),
+        ])->filter(fn (array $row) => $row['code'] !== ''
+            && $row['fr_property_id'] !== ''
+            && in_array($row['status'], ['activo', 'active'], true))
+            ->unique(fn (array $row) => $row['code'].'|'.$row['fr_property_id'])
+            ->values();
+        $codes = $this->normalizeCodes($rows->pluck('code'));
+        $propertyIds = $rows->pluck('fr_property_id')->filter()->unique()->values();
+
+        if ($rows->isEmpty()) {
+            throw ValidationException::withMessages([
+                'listings' => 'El exportable no contiene avisos con Estado Activo.',
+            ]);
+        }
+        if ($codes->count() !== $rows->count() || $propertyIds->count() !== $rows->count()) {
+            throw ValidationException::withMessages([
+                'listings' => 'Los avisos activos del exportable deben tener códigos locales y códigos Fincaraíz únicos.',
+            ]);
+        }
+
+        Cache::put($this->fincaraizExportKey($userId, $clientId), [
+            'filename' => trim((string) $filename),
+            'client_id' => $clientId,
+            'environment' => (string) config('portals.fincaraiz.environment', 'qa'),
+            'active_count' => $rows->count(),
+            'codes' => $codes->all(),
+            'property_ids_count' => $propertyIds->count(),
+            'imported_at' => now()->toIso8601String(),
+        ], now()->addDay());
+
+        return $this->audit('fincaraiz', $userId);
     }
 
     protected function auditCiencuadras(Integration $integration, Collection $localCodes): array
@@ -137,7 +187,7 @@ class PortalCatalogAuditService
             ->sortKeys()
             ->all();
         $references = $this->registryReferences($integration, config('portals.fincaraiz.environment'));
-        [$remoteCodes, $unknownRemote] = $this->codesFromRemoteRows($activeRows, $references);
+        [$apiRemoteCodes, $unknownRemote] = $this->codesFromRemoteRows($activeRows, $references);
         $activeRowsByCode = $activeRows
             ->map(fn (array $listing) => [
                 'code' => $this->codeFromRemoteRow($listing, $references),
@@ -145,27 +195,40 @@ class PortalCatalogAuditService
             ])
             ->filter(fn (array $listing) => $listing['code'] !== null)
             ->groupBy('code');
-        $duplicateGroups = $activeRowsByCode
+        $repeatedGroups = $activeRowsByCode
             ->filter(fn (Collection $listings) => $listings->count() > 1);
-        $duplicateActive = $duplicateGroups
+        $repeatedApiRows = $repeatedGroups
             ->sum(fn (Collection $listings) => $listings->count() - 1);
-        $duplicateDetails = $duplicateGroups
+        $repeatedDetails = $repeatedGroups
             ->flatMap(fn (Collection $listings, $code) => $listings->slice(1)->map(
                 fn (array $listing) => trim((string) $code).' · listing_id '.($listing['listing_id'] ?: 'no informado')
             ))
             ->values();
+
+        $usedQuota = $quota['used'] ?? null;
+        $officialExport = Cache::get($this->fincaraizExportKey($userId, $clientId));
+        $officialCodes = $this->normalizeCodes(collect(data_get($officialExport, 'codes', [])));
+        $officialMatchesQuota = is_array($officialExport)
+            && $officialCodes->isNotEmpty()
+            && ($usedQuota === null || $officialCodes->count() === $usedQuota);
+        $remoteCodes = $officialMatchesQuota ? $officialCodes : $apiRemoteCodes;
+        $coverage = $officialMatchesQuota
+            ? 'Exportable oficial de la Oficina Virtual'
+            : 'Inventario activo disponible en GET /listing';
+        $note = $officialMatchesQuota
+            ? 'Se usan únicamente los códigos únicos con Estado Activo del exportable oficial; GET /listing se conserva como diagnóstico técnico.'
+            : 'GET /listing no siempre coincide con los cupos usados. Carga un exportable oficial actualizado para auditar todos los códigos activos.';
 
         $result = $this->comparisonResult(
             $integration,
             $localCodes,
             $remoteCodes,
             $references->values()->unique(),
-            'Inventario activo completo de la API',
-            'Solo se consideran activos los avisos con estado 4 en Fincaraíz.',
-            $unknownRemote
+            $coverage,
+            $note,
+            $officialMatchesQuota ? collect() : $unknownRemote
         );
 
-        $usedQuota = $quota['used'] ?? null;
         $activeStatusFour = $activeRows->count();
         $quotaDifference = $usedQuota === null ? null : $usedQuota - $activeStatusFour;
 
@@ -176,14 +239,26 @@ class PortalCatalogAuditService
             'loaded' => $rows->count(),
             'active_status' => 4,
             'active_status_count' => $activeStatusFour,
-            'unique_active_codes' => $remoteCodes->count(),
-            'duplicate_active' => $duplicateActive,
-            'duplicate_codes' => $duplicateGroups->count(),
+            'unique_active_codes' => $apiRemoteCodes->count(),
+            'repeated_api_rows' => $repeatedApiRows,
+            'repeated_api_codes' => $repeatedGroups->count(),
+            'duplicate_active' => $repeatedApiRows,
+            'duplicate_codes' => $repeatedGroups->count(),
             'unlinked_active' => $unknownRemote->count(),
             'status_counts' => $statusCounts,
+            'source' => $officialMatchesQuota ? 'office_export' : 'listing_api',
         ];
-        $result['duplicate_active'] = $duplicateActive;
-        $result['details']['duplicate_active'] = $duplicateDetails->take(250)->all();
+        $result['official_export'] = is_array($officialExport) ? [
+            'filename' => data_get($officialExport, 'filename'),
+            'active_count' => $officialCodes->count(),
+            'property_ids_count' => (int) data_get($officialExport, 'property_ids_count', 0),
+            'imported_at' => data_get($officialExport, 'imported_at'),
+            'matches_quota' => $officialMatchesQuota,
+        ] : null;
+        $result['repeated_api_rows'] = $repeatedApiRows;
+        $result['duplicate_active'] = $repeatedApiRows;
+        $result['details']['repeated_api_rows'] = $repeatedDetails->take(250)->all();
+        $result['details']['duplicate_active'] = $repeatedDetails->take(250)->all();
         $result['quota_discrepancy'] = $quotaDifference === null ? null : [
             'has_difference' => $quotaDifference !== 0,
             'difference' => $quotaDifference,
@@ -438,5 +513,13 @@ class PortalCatalogAuditService
     protected function cacheKey(string $portal, ?int $userId): string
     {
         return 'portal-catalog-audit:v1:'.($userId ?: 'shared').':'.$portal;
+    }
+
+    protected function fincaraizExportKey(?int $userId, string $clientId): string
+    {
+        return 'portal-catalog-audit:fincaraiz-export:v1:'
+            .($userId ?: 'shared').':'
+            .(string) config('portals.fincaraiz.environment', 'qa').':'
+            .hash('sha256', $clientId);
     }
 }

@@ -20,6 +20,9 @@ class FincaraizWebhookTest extends TestCase
         parent::setUp();
 
         config()->set('portals.fincaraiz.environment', 'qa');
+        config()->set('portals.fincaraiz.api_key', 'qa-secret-key');
+        config()->set('portals.fincaraiz.client_id', 'df03d199-be5c-4c5c-98f6-849361cb7fae');
+        config()->set('portals.fincaraiz.page_url', 'https://www.fincaraiz.com.co');
         config()->set('portals.fincaraiz.webhook_id', 'hub-qa');
         config()->set('portals.fincaraiz.webhook_verify_token', 'verify-secret');
         $this->createTables();
@@ -78,10 +81,142 @@ class FincaraizWebhookTest extends TestCase
         $this->assertSame(401, $response->getStatusCode());
     }
 
-    private function controller(): FincaraizController
+    public function test_recovery_updates_then_requests_activation_for_a_disabled_listing(): void
+    {
+        $integration = Integration::create(['name' => 'Fincaraíz', 'slug' => 'fincaraiz']);
+        $property = Property::create(['code' => '96957', 'title' => 'Apartamento']);
+        PropertySyncStatus::create([
+            'property_id' => $property->id,
+            'integration_id' => $integration->id,
+            'environment' => 'qa',
+            'portal_variant' => 'default',
+            'sync_status' => 'error',
+            'external_id' => 'f92707a7-9f28-48c2-9937-9d81580da98e',
+            'last_response' => ['action' => 'activate'],
+        ]);
+
+        $client = $this->createMock(FincaraizClient::class);
+        $client->expects($this->once())->method('getListing')->willReturn([
+            'ok' => true,
+            'status' => 200,
+            'data' => ['id' => 'f92707a7-9f28-48c2-9937-9d81580da98e', 'status' => 1, 'frPropertyId' => 194071131],
+        ]);
+        $client->expects($this->once())->method('updateListing')->willReturn([
+            'ok' => true,
+            'status' => 202,
+            'data' => ['task' => ['id' => 'task-update-disabled']],
+        ]);
+        $mapper = $this->createMock(FincaraizPropertyMapper::class);
+        $mapper->expects($this->once())->method('map')->willReturn([
+            'property' => $property,
+            'payload' => ['external_code' => '96957'],
+            'errors' => [],
+            'warnings' => [],
+            'source' => [],
+        ]);
+
+        $response = (new FincaraizController($client, $mapper))->recover(new Request, '96957');
+        $sync = PropertySyncStatus::first();
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('update_activate', $response->getData(true)['Datos']['recovery_action']);
+        $this->assertSame('pending', $sync->sync_status);
+        $this->assertTrue($sync->last_response['activate_after_update']);
+        $this->assertSame('194071131', $sync->last_response['fr_property_id']);
+    }
+
+    public function test_completed_update_is_not_marked_published_while_listing_is_disabled(): void
+    {
+        $integration = Integration::create(['name' => 'Fincaraíz', 'slug' => 'fincaraiz']);
+        $property = Property::create(['code' => '97256', 'title' => 'Apartamento']);
+        PropertySyncStatus::create([
+            'property_id' => $property->id,
+            'integration_id' => $integration->id,
+            'environment' => 'qa',
+            'portal_variant' => 'default',
+            'sync_status' => 'pending',
+            'external_id' => 'e0f671ee-8943-4df7-916b-a6fe5cf2b440',
+            'last_response' => ['action' => 'update', 'task_id' => 'task-update'],
+        ]);
+
+        $client = $this->createMock(FincaraizClient::class);
+        $client->expects($this->once())->method('getTask')->willReturn([
+            'ok' => true,
+            'status' => 200,
+            'data' => ['task' => [
+                'id' => 'task-update',
+                'status' => 'COMPLETED',
+                'content' => [[
+                    'status' => 'COMPLETED',
+                    'external_code' => '97256',
+                    'listing_id' => 'e0f671ee-8943-4df7-916b-a6fe5cf2b440',
+                    'fr_property_id' => 194071133,
+                ]],
+            ]],
+        ]);
+        $client->expects($this->once())->method('getListing')->willReturn([
+            'ok' => true,
+            'status' => 200,
+            'data' => ['id' => 'e0f671ee-8943-4df7-916b-a6fe5cf2b440', 'status' => 1, 'frPropertyId' => 194071133],
+        ]);
+
+        $response = $this->controller($client)->verify(new Request, '97256');
+        $sync = PropertySyncStatus::first();
+
+        $this->assertSame('pending', $response->getData(true)['Datos']['sync_status']);
+        $this->assertTrue($response->getData(true)['Datos']['requires_activation']);
+        $this->assertSame('pending', $sync->sync_status);
+        $this->assertSame('activate_required', $sync->last_response['action']);
+        $this->assertNull($sync->external_url);
+    }
+
+    public function test_completed_update_is_published_only_after_listing_is_confirmed_active(): void
+    {
+        $integration = Integration::create(['name' => 'Fincaraíz', 'slug' => 'fincaraiz']);
+        $property = Property::create(['code' => '97950', 'title' => 'Apartamento']);
+        PropertySyncStatus::create([
+            'property_id' => $property->id,
+            'integration_id' => $integration->id,
+            'environment' => 'qa',
+            'portal_variant' => 'default',
+            'sync_status' => 'pending',
+            'external_id' => '96042c20-52b9-4ccf-a85d-6bcc43572c46',
+            'last_response' => ['action' => 'update', 'task_id' => 'task-active'],
+        ]);
+
+        $client = $this->createMock(FincaraizClient::class);
+        $client->expects($this->once())->method('getTask')->willReturn([
+            'ok' => true,
+            'status' => 200,
+            'data' => ['task' => [
+                'id' => 'task-active',
+                'status' => 'COMPLETED',
+                'content' => [[
+                    'status' => 'COMPLETED',
+                    'external_code' => '97950',
+                    'listing_id' => '96042c20-52b9-4ccf-a85d-6bcc43572c46',
+                    'fr_property_id' => 194071137,
+                ]],
+            ]],
+        ]);
+        $client->expects($this->once())->method('getListing')->willReturn([
+            'ok' => true,
+            'status' => 200,
+            'data' => ['id' => '96042c20-52b9-4ccf-a85d-6bcc43572c46', 'status' => 4, 'frPropertyId' => 194071137],
+        ]);
+
+        $response = $this->controller($client)->verify(new Request, '97950');
+        $sync = PropertySyncStatus::first();
+
+        $this->assertSame('synced', $response->getData(true)['Datos']['sync_status']);
+        $this->assertSame('https://www.fincaraiz.com.co/detalle/194071137', $sync->external_url);
+        $this->assertNull($sync->last_error);
+    }
+
+    private function controller(?FincaraizClient $client = null): FincaraizController
     {
         return new FincaraizController(
-            new class extends FincaraizClient
+            $client ?? new class extends FincaraizClient
             {
                 public function __construct() {}
             },

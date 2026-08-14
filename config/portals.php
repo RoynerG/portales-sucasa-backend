@@ -27,6 +27,7 @@ return [
     'fincaraiz' => [
         'environment' => $fincaraizEnvironment,
         'api_url' => env('FINCARAIZ_API_URL', $fincaraizUrls[$fincaraizEnvironment] ?? $fincaraizUrls['qa']),
+        'page_url' => env('FINCARAIZ_PAGE_URL', 'https://www.fincaraiz.com.co'),
         'api_key' => env('FINCARAIZ_API_KEY'),
         'client_id' => env('FINCARAIZ_CLIENT_ID'),
         'client_agent' => env('FINCARAIZ_CLIENT_AGENT'),

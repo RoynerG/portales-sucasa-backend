@@ -11,7 +11,7 @@ use Tests\TestCase;
 
 class PortalRecoveryControllerTest extends TestCase
 {
-    public function test_fincaraiz_missing_listing_with_a_reference_is_activated(): void
+    public function test_fincaraiz_recovery_uses_the_action_decided_from_the_remote_listing(): void
     {
         $controller = new class extends PortalRecoveryController
         {
@@ -27,16 +27,19 @@ class PortalRecoveryControllerTest extends TestCase
         };
         $fincaraiz = $this->createMock(FincaraizController::class);
         $fincaraiz->expects($this->once())
-            ->method('activate')
-            ->willReturn(new JsonResponse(['Datos' => ['ok' => true]]));
+            ->method('recover')
+            ->willReturn(new JsonResponse(['Datos' => [
+                'ok' => true,
+                'recovery_action' => 'update_activate',
+            ]]));
         $sync = new PropertySyncStatus(['external_id' => '11111111-1111-4111-8111-111111111111']);
 
-        [$action] = $controller->exposedRecover(new Request(), '59678', $sync, 'missing', $fincaraiz);
+        [$action] = $controller->exposedRecover(new Request, '59678', $sync, 'error', $fincaraiz);
 
-        $this->assertSame('activate', $action);
+        $this->assertSame('update_activate', $action);
     }
 
-    public function test_fincaraiz_error_uses_update_when_linked_and_publish_when_unlinked(): void
+    public function test_fincaraiz_recovery_has_a_safe_fallback_action(): void
     {
         $controller = new class extends PortalRecoveryController
         {
@@ -52,17 +55,11 @@ class PortalRecoveryControllerTest extends TestCase
         };
         $fincaraiz = $this->createMock(FincaraizController::class);
         $fincaraiz->expects($this->once())
-            ->method('update')
+            ->method('recover')
             ->willReturn(new JsonResponse(['Datos' => ['ok' => true]]));
-        $fincaraiz->expects($this->once())
-            ->method('publish')
-            ->willReturn(new JsonResponse(['Datos' => ['ok' => true]]));
-        $linked = new PropertySyncStatus(['external_id' => '11111111-1111-4111-8111-111111111111']);
 
-        [$linkedAction] = $controller->exposedRecover(new Request(), '59678', $linked, 'error', $fincaraiz);
-        [$unlinkedAction] = $controller->exposedRecover(new Request(), '59679', null, 'error', $fincaraiz);
+        [$action] = $controller->exposedRecover(new Request, '59679', null, 'error', $fincaraiz);
 
-        $this->assertSame('update', $linkedAction);
-        $this->assertSame('publish', $unlinkedAction);
+        $this->assertSame('recover', $action);
     }
 }

@@ -26,6 +26,11 @@ class PortalErrorSummarizerTest extends TestCase
             'operation' => ['Property can not be sell and rent at the same time.', 'business_rule', 'Venta y arriendo no se pueden enviar juntos'],
             'missing' => ['El inmueble que desea actualizar no existe', 'not_found', 'El portal no encontró el inmueble'],
             'photos' => ['No se pudieron cargar las fotos del inmueble', 'images', 'Fotos no aceptadas por el portal'],
+            'fincaraiz quota' => [
+                '{"images":[],"listings":[{"error":{"status":{"description":"No quota","status_code":123,"default_code":"no_quota"}}}]}',
+                'quota',
+                'Sin cupos disponibles en Fincaraíz',
+            ],
         ];
     }
 }

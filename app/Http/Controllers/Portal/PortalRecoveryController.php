@@ -96,13 +96,10 @@ class PortalRecoveryController extends Controller
         string $mode,
         FincaraizController $controller
     ): array {
-        if ($sync?->external_id) {
-            return $mode === 'missing'
-                ? ['activate', $controller->activate($request, $code)]
-                : ['update', $controller->update($request, $code)];
-        }
+        $response = $controller->recover($request, $code);
+        $action = (string) data_get($response->getData(true), 'Datos.recovery_action', 'recover');
 
-        return ['publish', $controller->publish($request, $code)];
+        return [$action, $response];
     }
 
     protected function recoverMercadoLibre(

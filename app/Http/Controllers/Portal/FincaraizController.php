@@ -339,6 +339,63 @@ class FincaraizController extends Controller
         return response()->json(['Datos' => $this->operationResult($result, $mapped)]);
     }
 
+    public function recover(Request $request, string $code): JsonResponse
+    {
+        $property = Property::where('code', $code)->firstOrFail();
+        $sync = $this->syncStatus($property);
+
+        if (! $sync?->external_id) {
+            return $this->withRecoveryAction($this->publish($request, $code), 'publish');
+        }
+
+        $settings = $this->settings($request);
+        $listing = $this->fr->getListing($this->apiKey($settings), $sync->external_id);
+
+        if (! $listing['ok']) {
+            if ((int) ($listing['status'] ?? 0) === 404) {
+                return $this->withRecoveryAction($this->publish($request, $code), 'publish');
+            }
+
+            $sync->update([
+                'sync_status' => 'error',
+                'last_response' => array_merge($sync->last_response ?? [], [
+                    'action' => 'recover',
+                    'listing_verification' => $listing['data'] ?? null,
+                ]),
+                'last_error' => $this->errorMessage($listing),
+                'last_attempt_at' => now(),
+                'attempts' => $sync->attempts + 1,
+            ]);
+
+            return response()->json(['Datos' => $listing + [
+                'sync_status' => 'error',
+                'external_id' => $sync->external_id,
+                'recovery_action' => 'verify',
+            ]], $this->responseStatus($listing));
+        }
+
+        $remote = $this->listingRow($listing['data'] ?? []);
+        $remoteStatus = $this->listingStatus($remote);
+        $response = $this->update($request, $code);
+
+        if ($this->responseAccepted($response)) {
+            $fresh = $this->syncStatus($property);
+            $lastResponse = $fresh?->last_response ?? [];
+            $lastResponse['remote_status_before_retry'] = $remoteStatus;
+            $lastResponse['fr_property_id'] = $this->listingPropertyId($remote)
+                ?: data_get($lastResponse, 'fr_property_id');
+            if (! $this->isActiveListingStatus($remoteStatus)) {
+                $lastResponse['activate_after_update'] = true;
+            }
+            $fresh?->update(['last_response' => $lastResponse]);
+        }
+
+        return $this->withRecoveryAction(
+            $response,
+            $this->isActiveListingStatus($remoteStatus) ? 'update' : 'update_activate'
+        );
+    }
+
     public function pause(Request $request, string $code): JsonResponse
     {
         return $this->changeStatus($request, $code, 'DISABLED', 'pause');
@@ -357,7 +414,10 @@ class FincaraizController extends Controller
         $taskId = trim((string) ($request->input('task_id') ?: $this->storedTaskId($sync)));
         abort_unless($taskId, 400, 'No hay task_id pendiente para verificar.');
 
-        $result = $this->fr->getTask($taskId, $this->apiKey($this->settings($request)));
+        $settings = $this->settings($request);
+        $apiKey = $this->apiKey($settings);
+
+        $result = $this->fr->getTask($taskId, $apiKey);
         if ($result['ok']) {
             $this->applyTaskResult($property, $result['data'], $sync);
         } else {
@@ -370,12 +430,20 @@ class FincaraizController extends Controller
         }
 
         $fresh = $sync->fresh();
+        $listingVerification = null;
+        if ($result['ok'] && $fresh?->sync_status === 'synced' && $fresh->external_id) {
+            $listingVerification = $this->fr->getListing($apiKey, $fresh->external_id);
+            $this->applyListingVerification($fresh, $listingVerification);
+            $fresh = $fresh->fresh();
+        }
 
         return response()->json(['Datos' => $result + [
             'sync_status' => $fresh->sync_status,
             'external_id' => $fresh->external_id,
+            'external_url' => $fresh->external_url,
             'action' => data_get($fresh->last_response, 'action'),
             'requires_activation' => (bool) data_get($fresh->last_response, 'requires_activation', false),
+            'listing_verification' => $listingVerification,
         ]]);
     }
 
@@ -420,7 +488,7 @@ class FincaraizController extends Controller
             }
             $this->applyTaskResult($property, array_replace_recursive($payload, [
                 'task' => ['content' => [$content]],
-            ]), $this->syncStatus($property));
+            ]), $this->syncStatus($property), true);
             $processed++;
         }
 
@@ -473,8 +541,12 @@ class FincaraizController extends Controller
         );
     }
 
-    protected function applyTaskResult(Property $property, array $data, ?PropertySyncStatus $sync = null): PropertySyncStatus
-    {
+    protected function applyTaskResult(
+        Property $property,
+        array $data,
+        ?PropertySyncStatus $sync = null,
+        bool $requireRemoteConfirmation = false
+    ): PropertySyncStatus {
         $sync ??= $this->syncStatus($property);
         $action = (string) data_get($sync?->last_response, 'action', 'publish');
         $task = $data['task'] ?? [];
@@ -486,20 +558,28 @@ class FincaraizController extends Controller
         $terminalStatus = $contentStatus ?: $taskStatus;
         $listingId = $content['listing_id'] ?? $sync?->external_id;
         $taskId = $task['id'] ?? $this->storedTaskId($sync);
+        $activateAfterUpdate = (bool) data_get($sync?->last_response, 'activate_after_update', false);
         $success = in_array($terminalStatus, ['COMPLETED'], true)
             || ($terminalStatus === 'FORWARDED' && ! empty($listingId));
-        $requiresActivation = $success && in_array($action, ['publish', 'activate_required'], true);
+        $requiresActivation = $success && (
+            in_array($action, ['publish', 'activate_required'], true)
+            || ($action === 'update' && $activateAfterUpdate)
+        );
 
         $syncStatus = match (true) {
             in_array($taskStatus, ['ERROR'], true) || in_array($contentStatus, ['ERROR'], true) => 'error',
             ! $success => 'pending',
             $action === 'pause' => 'paused',
             $requiresActivation => 'pending',
+            $requireRemoteConfirmation => 'pending',
             default => 'synced',
         };
         $lastError = $syncStatus === 'error'
             ? $this->taskErrorMessage($data)
             : null;
+        $frPropertyId = $content['fr_property_id']
+            ?? $content['frPropertyId']
+            ?? data_get($sync?->last_response, 'fr_property_id');
 
         return $property->syncStatuses()->updateOrCreate(
             [
@@ -510,11 +590,14 @@ class FincaraizController extends Controller
             [
                 'sync_status' => $syncStatus,
                 'external_id' => $listingId,
+                'external_url' => $syncStatus === 'synced'
+                    ? $this->listingPublicUrl($frPropertyId)
+                    : ($syncStatus === 'paused' ? null : $sync?->external_url),
                 'last_response' => [
                     'action' => $requiresActivation ? 'activate_required' : $action,
                     'task_id' => $taskId,
                     'requires_activation' => $requiresActivation,
-                    'fr_property_id' => $content['fr_property_id'] ?? null,
+                    'fr_property_id' => $frPropertyId,
                     'portal' => $data,
                 ],
                 'last_error' => $lastError,
@@ -523,6 +606,131 @@ class FincaraizController extends Controller
                 'attempts' => ($sync?->attempts ?? 0) + 1,
             ]
         );
+    }
+
+    protected function applyListingVerification(PropertySyncStatus $sync, array $result): PropertySyncStatus
+    {
+        $lastResponse = $sync->last_response ?? [];
+        $lastResponse['listing_verification'] = $result['data'] ?? null;
+
+        if (! $result['ok']) {
+            $status = (int) ($result['status'] ?? 0);
+            $lastResponse['requires_activation'] = false;
+
+            $sync->update([
+                'sync_status' => 'pending',
+                'last_response' => $lastResponse,
+                'last_error' => $status === 404
+                    ? 'Fincaraíz todavía no encuentra el aviso después de procesar la tarea.'
+                    : 'No fue posible confirmar el estado final del aviso en Fincaraíz.',
+                'last_attempt_at' => now(),
+            ]);
+
+            return $sync->fresh();
+        }
+
+        $listing = $this->listingRow($result['data'] ?? []);
+        $status = $this->listingStatus($listing);
+        $frPropertyId = $this->listingPropertyId($listing)
+            ?: data_get($lastResponse, 'fr_property_id');
+        $lastResponse['fr_property_id'] = $frPropertyId;
+        $lastResponse['remote_status'] = $status;
+
+        if ($this->isActiveListingStatus($status)) {
+            $lastResponse['requires_activation'] = false;
+            $sync->update([
+                'sync_status' => 'synced',
+                'external_url' => $this->listingPublicUrl($frPropertyId),
+                'last_response' => $lastResponse,
+                'last_error' => null,
+                'last_synced_at' => now(),
+                'last_attempt_at' => now(),
+            ]);
+
+            return $sync->fresh();
+        }
+
+        $action = (string) data_get($lastResponse, 'action', 'update');
+        $requiresActivation = ! in_array($action, ['activate', 'activate_required'], true);
+        $lastResponse['action'] = $requiresActivation ? 'activate_required' : $action;
+        $lastResponse['requires_activation'] = $requiresActivation;
+
+        $sync->update([
+            'sync_status' => 'pending',
+            'external_url' => null,
+            'last_response' => $lastResponse,
+            'last_error' => 'El aviso existe en Fincaraíz, pero todavía no está activo.',
+            'last_attempt_at' => now(),
+        ]);
+
+        return $sync->fresh();
+    }
+
+    protected function listingRow(array $data): array
+    {
+        $row = data_get($data, 'listing')
+            ?? data_get($data, 'result')
+            ?? data_get($data, 'results.0')
+            ?? $data;
+
+        if (is_array($row) && array_is_list($row)) {
+            $row = $row[0] ?? [];
+        }
+
+        return is_array($row) ? $row : [];
+    }
+
+    protected function listingStatus(array $listing): mixed
+    {
+        return $listing['status'] ?? $listing['listing_status'] ?? $listing['listingStatus'] ?? null;
+    }
+
+    protected function listingPropertyId(array $listing): string
+    {
+        return trim((string) ($listing['fr_property_id'] ?? $listing['frPropertyId'] ?? ''));
+    }
+
+    protected function isActiveListingStatus(mixed $status): bool
+    {
+        if (is_numeric($status)) {
+            return (int) $status === 4;
+        }
+
+        return in_array(strtoupper(trim((string) $status)), ['ACTIVE', 'ACTIVO', 'PUBLISHED', 'PUBLICADO'], true);
+    }
+
+    protected function listingPublicUrl(mixed $frPropertyId): ?string
+    {
+        $id = trim((string) $frPropertyId);
+        if ($id === '') {
+            return null;
+        }
+
+        return rtrim((string) config('portals.fincaraiz.page_url', 'https://www.fincaraiz.com.co'), '/')
+            .'/detalle/'.rawurlencode($id);
+    }
+
+    protected function withRecoveryAction(JsonResponse $response, string $action): JsonResponse
+    {
+        $payload = $response->getData(true);
+        $payload['Datos']['recovery_action'] = $action;
+        $response->setData($payload);
+
+        return $response;
+    }
+
+    protected function responseAccepted(JsonResponse $response): bool
+    {
+        $data = $response->getData(true)['Datos'] ?? [];
+
+        return $response->getStatusCode() < 400 && ($data['ok'] ?? true) !== false;
+    }
+
+    protected function responseStatus(array $result): int
+    {
+        $status = (int) ($result['status'] ?? 0);
+
+        return $status >= 400 && $status <= 599 ? $status : 502;
     }
 
     protected function settings(Request $request): array

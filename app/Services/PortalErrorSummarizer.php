@@ -6,12 +6,33 @@ class PortalErrorSummarizer
 {
     public function summarize(?string $lastError, array $response, ?string $syncStatus): array
     {
-        $portalError = $this->findPortalError($response);
+        $decodedLastError = json_decode((string) $lastError, true);
+        $lastErrorData = is_array($decodedLastError) ? $decodedLastError : [];
+        $portalError = $this->findPortalError($response) ?? $this->findPortalError($lastErrorData);
         $text = $this->compactText($portalError['text'] ?? $lastError ?? '');
         $field = $portalError['field'] ?? null;
-        $statusCode = $portalError['statusCode'] ?? null;
-        $propertyCode = $portalError['propertyCode'] ?? $this->findScalar($response, 'propertyCode');
+        $statusCode = $portalError['statusCode']
+            ?? $this->findScalar($response, 'status_code')
+            ?? $this->findScalar($lastErrorData, 'status_code');
+        $propertyCode = $portalError['propertyCode']
+            ?? $this->findScalar($response, 'propertyCode')
+            ?? $this->findScalar($response, 'external_code')
+            ?? $this->findScalar($lastErrorData, 'external_code');
         $searchText = $this->searchText($lastError, $response);
+
+        if (str_contains($searchText, 'no_quota')
+            || str_contains($searchText, 'no quota')
+            || (string) $statusCode === '123') {
+            return $this->payload(
+                'Sin cupos disponibles en Fincaraíz',
+                'Fincaraíz rechazó la activación porque la cuenta no tenía cupos disponibles en ese momento.',
+                'Libera o contrata un cupo y vuelve a intentar. El sistema verificará el aviso y lo activará si está desactivado.',
+                null,
+                $statusCode ?: 123,
+                $propertyCode,
+                'quota'
+            );
+        }
 
         if ($field === 'numBedRooms' || str_contains($searchText, 'numbedrooms')) {
             return $this->payload(
@@ -163,8 +184,7 @@ class PortalErrorSummarizer
         mixed $statusCode,
         mixed $propertyCode,
         string $type
-    ): array
-    {
+    ): array {
         $typeLabels = [
             'property_data' => 'Datos del inmueble',
             'images' => 'Fotos',
@@ -173,6 +193,7 @@ class PortalErrorSummarizer
             'not_found' => 'Código no encontrado',
             'account' => 'Cuenta o permisos',
             'connection' => 'Conexión',
+            'quota' => 'Cupo del portal',
             'portal_rejected' => 'Solicitud rechazada',
             'unknown' => 'Sin clasificar',
         ];
@@ -202,6 +223,19 @@ class PortalErrorSummarizer
     {
         if (! is_array($data)) {
             return null;
+        }
+
+        if (is_array($data['status'] ?? null)) {
+            $status = $data['status'];
+            $description = $status['description'] ?? $status['default_code'] ?? null;
+            if ($description !== null || isset($status['status_code'])) {
+                return [
+                    'text' => $this->compactText((string) ($description ?? '')),
+                    'field' => null,
+                    'statusCode' => $status['status_code'] ?? null,
+                    'propertyCode' => $data['external_code'] ?? null,
+                ];
+            }
         }
 
         $status = strtolower((string) ($data['status'] ?? ''));
@@ -272,6 +306,6 @@ class PortalErrorSummarizer
             return 'El portal no entregó un mensaje específico.';
         }
 
-        return mb_strtoupper(mb_substr($text, 0, 1, 'UTF-8'), 'UTF-8') . mb_substr($text, 1, 260, 'UTF-8');
+        return mb_strtoupper(mb_substr($text, 0, 1, 'UTF-8'), 'UTF-8').mb_substr($text, 1, 260, 'UTF-8');
     }
 }

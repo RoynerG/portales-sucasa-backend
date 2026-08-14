@@ -65,6 +65,7 @@ class AutoSyncFincaraiz extends Command
             'verify' => 0,
             'publish' => 0,
             'update' => 0,
+            'recover' => 0,
             'activate' => 0,
             'pause' => 0,
             'skipped' => 0,
@@ -131,7 +132,7 @@ class AutoSyncFincaraiz extends Command
             );
         }
 
-        $this->info("Listo Fincaraíz. Verificar: {$summary['verify']} | Publicar: {$summary['publish']} | Actualizar: {$summary['update']} | Activar: {$summary['activate']} | Retirar: {$summary['pause']} | Omitidos: {$summary['skipped']} | Errores: {$summary['error']}");
+        $this->info("Listo Fincaraíz. Verificar: {$summary['verify']} | Publicar: {$summary['publish']} | Actualizar: {$summary['update']} | Recuperar: {$summary['recover']} | Activar: {$summary['activate']} | Retirar: {$summary['pause']} | Omitidos: {$summary['skipped']} | Errores: {$summary['error']}");
 
         return $summary['error'] > 0 ? self::FAILURE : self::SUCCESS;
     }
@@ -280,7 +281,7 @@ class AutoSyncFincaraiz extends Command
                 return $sync->external_id ? 'activate' : 'publish';
             }
             if ($current === 'error') {
-                return $retryErrors ? ($sync->external_id ? 'update' : 'publish') : null;
+                return $retryErrors ? 'recover' : null;
             }
 
             $modifiedAt = $this->wpModifiedAt($row);

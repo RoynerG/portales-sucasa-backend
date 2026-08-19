@@ -280,7 +280,10 @@ backend/
 | GET    | `/api/properties/stats` | sí | Stats por estado |
 | GET    | `/api/properties/distribution` | sí | Propiedades por consultor |
 | GET    | `/api/properties/highlights` | sí | Destacados activos, mercados, responsables e historial |
-| DELETE | `/api/properties/{code}/highlight` | sí (administración) | Desarmar el destacado y liberar su cupo |
+| GET    | `/api/properties/highlight-quotas` | sí | Límites, asignación, uso y disponibilidad de cupos |
+| PATCH  | `/api/properties/highlight-quotas/{employee}` | sí (administración) | Actualizar cupos por mercado de un funcionario |
+| PATCH  | `/api/properties/highlight-quota-limits` | sí (administración) | Actualizar los límites generales en `confi_sistema` |
+| DELETE | `/api/properties/{code}/highlight` | sí (administración) | Liberar el cupo local conservando el historial |
 | POST   | `/api/properties/{code}/sync/{portal}` | sí | Actualizar sync_status |
 | GET    | `/api/integrations` | sí | Listar portales activos |
 | GET    | `/api/consultants` | sí | Listar consultores |

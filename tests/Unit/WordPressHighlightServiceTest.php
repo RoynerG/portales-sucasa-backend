@@ -72,6 +72,7 @@ class WordPressHighlightServiceTest extends TestCase
             $table->string('codigo_inmueble');
             $table->string('portal');
             $table->string('estado');
+            $table->string('solicitado_por_id')->nullable();
             $table->string('completado_por_id')->nullable();
             $table->string('completado_por_nombre')->nullable();
             $table->dateTime('requested_at')->nullable();
@@ -89,6 +90,25 @@ class WordPressHighlightServiceTest extends TestCase
             $table->unsignedBigInteger('cct_author_id')->nullable();
             $table->dateTime('cct_created')->nullable();
             $table->dateTime('cct_modified')->nullable();
+        });
+
+        Schema::connection('wordpress')->create('wp_jet_cct_funcionarios', function (Blueprint $table): void {
+            $table->increments('_ID');
+            $table->string('id_empleado');
+            $table->string('nombre');
+            $table->string('rol')->nullable();
+            $table->string('gestion')->nullable();
+            $table->string('activo')->default('Si');
+            $table->string('id_cargo');
+            foreach (array_keys(WordPressHighlightService::MARKETS) as $market) {
+                $table->unsignedInteger($market)->default(0);
+            }
+        });
+
+        Schema::connection('wordpress')->create('wp_jet_cct_confi_sistema', function (Blueprint $table): void {
+            $table->increments('_ID');
+            $table->string('funcion');
+            $table->string('valor');
         });
 
         $this->seedHighlights();
@@ -136,6 +156,45 @@ class WordPressHighlightServiceTest extends TestCase
         $this->assertSame('77', $history->id_empleado);
         $this->assertSame('Royner Guardo', $history->funcionario);
         $this->assertStringContainsString('panel de portales', $history->observacion);
+        $this->assertStringContainsString('No se eliminó el historial', $history->observacion);
+    }
+
+    public function test_it_reports_and_updates_employee_quotas_without_exceeding_system_limits(): void
+    {
+        $service = new WordPressHighlightService;
+        $result = $service->quotas();
+
+        $this->assertSame(2, $result['pagination']['total']);
+        $this->assertSame(12, $result['summary']['limit']);
+        $this->assertSame(5, $result['summary']['assigned']);
+        $this->assertSame(2, $result['summary']['used']);
+        $this->assertSame(1, $result['summary']['pending']);
+        $this->assertSame(1, $result['summary']['overcommitted']);
+        $this->assertSame(3, $result['summary']['available']);
+
+        $employee = collect($result['items'])->firstWhere('employee_id', '10');
+        $this->assertSame(3, $employee['markets']['mercado_libre_destacados']['assigned']);
+        $this->assertSame(1, $employee['markets']['mercado_libre_destacados']['used']);
+        $this->assertSame(2, $employee['markets']['mercado_libre_destacados']['available']);
+
+        $updated = $service->updateQuotas((string) $employee['id'], ['mercado_libre_destacados' => 4]);
+        $this->assertSame(4, $updated['quotas']['mercado_libre_destacados']);
+        $this->assertSame(4, DB::connection('wordpress')->table('wp_jet_cct_funcionarios')->where('_ID', $employee['id'])->value('mercado_libre_destacados'));
+
+        $this->expectException(\DomainException::class);
+        $service->updateQuotas((string) $employee['id'], ['mercado_libre_destacados' => 6]);
+    }
+
+    public function test_it_updates_system_limits_without_dropping_below_assigned_quotas(): void
+    {
+        $service = new WordPressHighlightService;
+        $result = $service->updateQuotaLimits(['mercado_libre_destacados' => 6]);
+
+        $this->assertSame(6, $result['limits']['mercado_libre_destacados']);
+        $this->assertSame('6', DB::connection('wordpress')->table('wp_jet_cct_confi_sistema')->where('funcion', 'mercado_libre_destacados')->value('valor'));
+
+        $this->expectException(\DomainException::class);
+        $service->updateQuotaLimits(['mercado_libre_destacados' => 2]);
     }
 
     private function seedHighlights(): void
@@ -187,6 +246,7 @@ class WordPressHighlightServiceTest extends TestCase
                 'codigo_inmueble' => '100',
                 'portal' => 'mercado_libre_destacados',
                 'estado' => 'destacado',
+                'solicitado_por_id' => '10',
                 'completado_por_id' => '6',
                 'completado_por_nombre' => 'Coordinador',
                 'requested_at' => '2024-07-01 10:00:00',
@@ -196,11 +256,25 @@ class WordPressHighlightServiceTest extends TestCase
                 'codigo_inmueble' => '200',
                 'portal' => 'finca_raiz_silver',
                 'estado' => 'pendiente',
+                'solicitado_por_id' => '20',
                 'completado_por_id' => null,
                 'completado_por_nombre' => null,
                 'requested_at' => '2024-07-02 10:00:00',
                 'completed_at' => null,
             ],
+        ]);
+
+        $employeeDefaults = array_fill_keys(array_keys(WordPressHighlightService::MARKETS), 0);
+        DB::connection('wordpress')->table('wp_jet_cct_funcionarios')->insert([
+            [...$employeeDefaults, '_ID' => 1, 'id_empleado' => '10', 'nombre' => 'Asesora Uno', 'rol' => 'Asesor', 'gestion' => 'Ventas', 'activo' => 'Si', 'id_cargo' => '9', 'mercado_libre_destacados' => 3],
+            [...$employeeDefaults, '_ID' => 2, 'id_empleado' => '20', 'nombre' => 'Asesor Dos', 'rol' => 'Asesor', 'gestion' => 'Arriendos', 'activo' => 'Si', 'id_cargo' => '10', 'proppit_promocionados' => 2],
+            [...$employeeDefaults, '_ID' => 3, 'id_empleado' => '30', 'nombre' => 'Funcionario oculto', 'rol' => 'Otro', 'gestion' => 'Otra', 'activo' => 'Si', 'id_cargo' => '99'],
+        ]);
+
+        DB::connection('wordpress')->table('wp_jet_cct_confi_sistema')->insert([
+            ['funcion' => 'mercado_libre_destacados', 'valor' => '5'],
+            ['funcion' => 'proppit_promocionados', 'valor' => '4'],
+            ['funcion' => 'ciencuadras_ascendidos', 'valor' => '3'],
         ]);
     }
 }

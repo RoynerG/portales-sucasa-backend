@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\User;
 use Carbon\Carbon;
+use DomainException;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use OutOfBoundsException;
@@ -11,6 +12,8 @@ use stdClass;
 
 class WordPressHighlightService
 {
+    private const QUOTA_CARGO_IDS = ['13', '14', '12', '11', '1', '6', '9', '10', '17'];
+
     public const MARKETS = [
         'mercado_libre_destacados' => [
             'label' => 'Mercado Libre',
@@ -129,7 +132,7 @@ class WordPressHighlightService
                 'id_empleado' => $employeeId,
                 'funcionario' => $actor->name ?: 'Funcionario',
                 'tipo_reporte' => 'Destacado',
-                'observacion' => 'Se liberó el cupo de destacado del inmueble desde el panel de portales.',
+                'observacion' => 'Se liberó el cupo de destacado desde el panel de portales. Mercados desactivados: '.collect($markets)->pluck('label')->join(', ').'. No se eliminó el historial ni se ejecutaron acciones en los portales externos.',
                 'cct_author_id' => (int) $employeeId,
                 'cct_created' => now(),
                 'cct_modified' => now(),
@@ -138,7 +141,116 @@ class WordPressHighlightService
             return [
                 'code' => (string) (($property->codigo ?? '') ?: $property->_ID),
                 'released_markets' => $markets,
-                'message' => 'Destacado desarmado y cupo liberado correctamente.',
+                'message' => 'Cupo liberado correctamente. El historial se conservó.',
+            ];
+        });
+    }
+
+    public function quotas(array $filters = []): array
+    {
+        $page = max(1, (int) ($filters['pagina'] ?? 1));
+        $limit = min(100, max(10, (int) ($filters['limite'] ?? 25)));
+        $query = $this->quotaEmployeesQuery();
+        $search = trim((string) ($filters['buscar'] ?? ''));
+        if ($search !== '') {
+            $query->where(function (Builder $where) use ($search): void {
+                $where->where('f.nombre', 'like', "%{$search}%")
+                    ->orWhere('f.id_empleado', 'like', "%{$search}%")
+                    ->orWhere('f.rol', 'like', "%{$search}%")
+                    ->orWhere('f.gestion', 'like', "%{$search}%");
+            });
+        }
+
+        $total = (clone $query)->count('f._ID');
+        $pages = max(1, (int) ceil($total / $limit));
+        $page = min($page, $pages);
+        $employees = $query
+            ->orderByRaw("CASE WHEN f.rol = 'Servicio al cliente' THEN 0 ELSE 1 END")
+            ->orderBy('f.nombre')
+            ->forPage($page, $limit)
+            ->get();
+        $usage = $this->quotaUsage($employees->pluck('id_empleado')->map(fn ($id): string => (string) $id)->all());
+
+        return [
+            'items' => $employees->map(fn (stdClass $employee): array => $this->mapQuotaEmployee($employee, $usage))->values()->all(),
+            'pagination' => [
+                'page' => $page,
+                'pages' => $pages,
+                'limit' => $limit,
+                'total' => $total,
+                'from' => $total > 0 ? (($page - 1) * $limit) + 1 : 0,
+                'to' => min($total, $page * $limit),
+            ],
+            'summary' => $this->quotaSummary(),
+            'markets' => $this->marketOptions(),
+        ];
+    }
+
+    public function updateQuotas(string $employeeRecordId, array $values): array
+    {
+        return DB::connection('wordpress')->transaction(function () use ($employeeRecordId, $values): array {
+            $employee = $this->quotaEmployeesQuery()
+                ->where('f._ID', $employeeRecordId)
+                ->lockForUpdate()
+                ->first();
+            if (! $employee) {
+                throw new DomainException('No se encontró el funcionario activo indicado.');
+            }
+
+            $limits = $this->quotaLimits();
+            $assigned = $this->quotaAssignedTotals();
+            $updates = [];
+            foreach (self::MARKETS as $key => $market) {
+                $value = array_key_exists($key, $values) ? (int) $values[$key] : (int) ($employee->{$key} ?? 0);
+                if ($value < 0) {
+                    throw new DomainException('Los cupos no pueden ser negativos.');
+                }
+
+                $projected = (int) ($assigned[$key] ?? 0) - (int) ($employee->{$key} ?? 0) + $value;
+                if ($projected > (int) ($limits[$key] ?? 0)) {
+                    throw new DomainException("{$market['label']} supera el límite general: {$projected}/{$limits[$key]} cupos asignados.");
+                }
+                $updates[$key] = $value;
+            }
+
+            DB::connection('wordpress')->table('wp_jet_cct_funcionarios')->where('_ID', $employee->_ID)->update($updates);
+
+            return [
+                'employee_id' => (string) $employee->_ID,
+                'employee_name' => (string) $employee->nombre,
+                'quotas' => $updates,
+                'message' => 'Cupos de '.($employee->nombre ?: 'funcionario').' actualizados correctamente.',
+            ];
+        });
+    }
+
+    public function updateQuotaLimits(array $values): array
+    {
+        return DB::connection('wordpress')->transaction(function () use ($values): array {
+            $current = $this->quotaLimits();
+            $assigned = $this->quotaAssignedTotals();
+            $updates = [];
+            foreach (self::MARKETS as $key => $market) {
+                $value = array_key_exists($key, $values) ? (int) $values[$key] : (int) ($current[$key] ?? 0);
+                if ($value < 0) {
+                    throw new DomainException('Los límites generales no pueden ser negativos.');
+                }
+                if ($value < (int) ($assigned[$key] ?? 0)) {
+                    throw new DomainException("{$market['label']} no puede quedar en {$value}: ya hay {$assigned[$key]} cupos asignados a funcionarios.");
+                }
+                $updates[$key] = $value;
+            }
+
+            foreach ($updates as $key => $value) {
+                DB::connection('wordpress')->table('wp_jet_cct_confi_sistema')->updateOrInsert(
+                    ['funcion' => $key],
+                    ['valor' => (string) $value]
+                );
+            }
+
+            return [
+                'limits' => $updates,
+                'message' => 'Límites generales de cupos actualizados en la configuración del sistema.',
             ];
         });
     }
@@ -316,6 +428,177 @@ class WordPressHighlightService
             ->map(fn (array $market, string $key): array => ['key' => $key, 'label' => $market['label']])
             ->values()
             ->all();
+    }
+
+    private function quotaEmployeesQuery(): Builder
+    {
+        return DB::connection('wordpress')
+            ->table('wp_jet_cct_funcionarios as f')
+            ->where('f.activo', 'Si')
+            ->whereIn('f.id_cargo', self::QUOTA_CARGO_IDS)
+            ->select(array_merge([
+                'f._ID',
+                'f.id_empleado',
+                'f.nombre',
+                'f.rol',
+                'f.gestion',
+            ], collect(array_keys(self::MARKETS))->map(fn (string $key): string => 'f.'.$key)->all()));
+    }
+
+    private function quotaLimits(): array
+    {
+        $limits = array_fill_keys(array_keys(self::MARKETS), 0);
+        DB::connection('wordpress')
+            ->table('wp_jet_cct_confi_sistema')
+            ->whereIn('funcion', array_keys(self::MARKETS))
+            ->get(['funcion', 'valor'])
+            ->each(function (stdClass $row) use (&$limits): void {
+                if (array_key_exists((string) $row->funcion, $limits)) {
+                    $limits[(string) $row->funcion] = max(0, (int) $row->valor);
+                }
+            });
+
+        return $limits;
+    }
+
+    private function quotaAssignedTotals(): array
+    {
+        $totals = array_fill_keys(array_keys(self::MARKETS), 0);
+        $this->quotaEmployeesQuery()->get()->each(function (stdClass $employee) use (&$totals): void {
+            foreach (array_keys(self::MARKETS) as $key) {
+                $totals[$key] += max(0, (int) ($employee->{$key} ?? 0));
+            }
+        });
+
+        return $totals;
+    }
+
+    private function quotaUsage(array $employeeIds): array
+    {
+        $employeeIds = array_values(array_filter(array_unique($employeeIds), fn ($id): bool => $id !== ''));
+        $usage = [];
+        foreach ($employeeIds as $employeeId) {
+            $usage[$employeeId] = array_fill_keys(array_keys(self::MARKETS), ['used' => 0, 'pending' => 0]);
+        }
+        if ($employeeIds === []) {
+            return $usage;
+        }
+
+        foreach (self::MARKETS as $key => $market) {
+            DB::connection('wordpress')
+                ->table('wp_jet_cct_inmuebles')
+                ->whereIn('id_funcionario', $employeeIds)
+                ->where('estado', 'Publico')
+                ->where($market['property_column'], 'Si')
+                ->selectRaw('id_funcionario, COUNT(*) as aggregate')
+                ->groupBy('id_funcionario')
+                ->get()
+                ->each(function (stdClass $row) use (&$usage, $key): void {
+                    $usage[(string) $row->id_funcionario][$key]['used'] = (int) $row->aggregate;
+                });
+
+            DB::connection('wordpress')
+                ->table('wp_skc_destacado_solicitudes as s')
+                ->leftJoin('wp_jet_cct_inmuebles as i', 'i.codigo', '=', 's.codigo_inmueble')
+                ->whereIn('s.solicitado_por_id', $employeeIds)
+                ->where('s.portal', $key)
+                ->where('s.estado', 'pendiente')
+                ->where(function (Builder $inactive) use ($market): void {
+                    $inactive->whereNull('i.'.$market['property_column'])
+                        ->orWhere('i.'.$market['property_column'], '<>', 'Si');
+                })
+                ->selectRaw('s.solicitado_por_id, COUNT(*) as aggregate')
+                ->groupBy('s.solicitado_por_id')
+                ->get()
+                ->each(function (stdClass $row) use (&$usage, $key): void {
+                    $usage[(string) $row->solicitado_por_id][$key]['pending'] = (int) $row->aggregate;
+                });
+        }
+
+        return $usage;
+    }
+
+    private function quotaSummary(): array
+    {
+        $employees = $this->quotaEmployeesQuery()->get();
+        $usage = $this->quotaUsage($employees->pluck('id_empleado')->map(fn ($id): string => (string) $id)->all());
+        $limits = $this->quotaLimits();
+        $assigned = $this->quotaAssignedTotals();
+        $markets = [];
+
+        foreach (self::MARKETS as $key => $market) {
+            $used = collect($usage)->sum(fn (array $employee): int => (int) ($employee[$key]['used'] ?? 0));
+            $pending = collect($usage)->sum(fn (array $employee): int => (int) ($employee[$key]['pending'] ?? 0));
+            $available = $employees->sum(function (stdClass $employee) use ($usage, $key): int {
+                $employeeId = (string) $employee->id_empleado;
+
+                return max(0, (int) ($employee->{$key} ?? 0) - (int) ($usage[$employeeId][$key]['used'] ?? 0) - (int) ($usage[$employeeId][$key]['pending'] ?? 0));
+            });
+            $overcommitted = $employees->sum(function (stdClass $employee) use ($usage, $key): int {
+                $employeeId = (string) $employee->id_empleado;
+
+                return max(0, (int) ($usage[$employeeId][$key]['used'] ?? 0) + (int) ($usage[$employeeId][$key]['pending'] ?? 0) - (int) ($employee->{$key} ?? 0));
+            });
+            $markets[$key] = [
+                'key' => $key,
+                'label' => $market['label'],
+                'limit' => (int) ($limits[$key] ?? 0),
+                'assigned' => (int) ($assigned[$key] ?? 0),
+                'used' => $used,
+                'pending' => $pending,
+                'available' => $available,
+                'unassigned' => max(0, (int) ($limits[$key] ?? 0) - (int) ($assigned[$key] ?? 0)),
+                'overcommitted' => $overcommitted,
+            ];
+        }
+
+        return [
+            'employees' => $employees->count(),
+            'limit' => collect($markets)->sum('limit'),
+            'assigned' => collect($markets)->sum('assigned'),
+            'used' => collect($markets)->sum('used'),
+            'pending' => collect($markets)->sum('pending'),
+            'available' => collect($markets)->sum('available'),
+            'unassigned' => collect($markets)->sum('unassigned'),
+            'overcommitted' => collect($markets)->sum('overcommitted'),
+            'markets' => $markets,
+        ];
+    }
+
+    private function mapQuotaEmployee(stdClass $employee, array $usage): array
+    {
+        $employeeId = (string) $employee->id_empleado;
+        $markets = [];
+        foreach (self::MARKETS as $key => $market) {
+            $assigned = max(0, (int) ($employee->{$key} ?? 0));
+            $used = (int) ($usage[$employeeId][$key]['used'] ?? 0);
+            $pending = (int) ($usage[$employeeId][$key]['pending'] ?? 0);
+            $markets[$key] = [
+                'key' => $key,
+                'label' => $market['label'],
+                'assigned' => $assigned,
+                'used' => $used,
+                'pending' => $pending,
+                'available' => max(0, $assigned - $used - $pending),
+                'overcommitted' => max(0, $used + $pending - $assigned),
+            ];
+        }
+
+        return [
+            'id' => (string) $employee->_ID,
+            'employee_id' => $employeeId,
+            'name' => $employee->nombre,
+            'role' => $employee->rol,
+            'management' => $employee->gestion,
+            'markets' => $markets,
+            'totals' => [
+                'assigned' => collect($markets)->sum('assigned'),
+                'used' => collect($markets)->sum('used'),
+                'pending' => collect($markets)->sum('pending'),
+                'available' => collect($markets)->sum('available'),
+                'overcommitted' => collect($markets)->sum('overcommitted'),
+            ],
+        ];
     }
 
     private function mapRow(stdClass $row): array

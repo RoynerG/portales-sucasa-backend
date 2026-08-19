@@ -56,6 +56,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/properties/portal-summary', [PropertyController::class, 'portalSummary']);
     Route::get('/properties/distribution', [PropertyController::class, 'distribution']);
     Route::get('/properties/highlights', [PropertyHighlightController::class, 'index']);
+    Route::get('/properties/highlight-quotas', [PropertyHighlightController::class, 'quotas']);
+    Route::patch('/properties/highlight-quotas/{employee}', [PropertyHighlightController::class, 'updateQuotas'])->middleware('portal-reset');
+    Route::patch('/properties/highlight-quota-limits', [PropertyHighlightController::class, 'updateQuotaLimits'])->middleware('portal-reset');
     Route::delete('/properties/{code}/highlight', [PropertyHighlightController::class, 'destroy'])->middleware('portal-reset');
     Route::get('/properties/{code}', [PropertyController::class, 'show']);
     Route::patch('/properties/{code}', [PropertyController::class, 'update']);

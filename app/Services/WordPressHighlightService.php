@@ -328,7 +328,8 @@ class WordPressHighlightService
 
     public function completeRequest(string $requestId, User $actor): array
     {
-        return DB::connection('wordpress')->transaction(function () use ($requestId, $actor): array {
+        $notificationContext = null;
+        $result = DB::connection('wordpress')->transaction(function () use ($requestId, $actor, &$notificationContext): array {
             $request = DB::connection('wordpress')
                 ->table('wp_skc_destacado_solicitudes')
                 ->where('id', $requestId)
@@ -436,6 +437,8 @@ class WordPressHighlightService
                 'completed_at' => now(),
             ]);
 
+            $notificationContext = [$property, $request, $market['label']];
+
             return [
                 'request_id' => (string) $request->id,
                 'code' => $propertyCode,
@@ -444,6 +447,17 @@ class WordPressHighlightService
                 'message' => "Solicitud {$propertyCode} marcada como destacada en {$market['label']}.",
             ];
         });
+
+        $notifications = ['queued' => 0, 'skipped' => []];
+        if (is_array($notificationContext)) {
+            $notifications = (new WordPressHighlightNotificationService)->enqueueCompletion(...$notificationContext);
+        }
+        $result['notifications'] = $notifications;
+        if ($notifications['queued'] > 0) {
+            $result['message'] .= " {$notifications['queued']} correo(s) quedaron en cola.";
+        }
+
+        return $result;
     }
 
     public static function marketsFor(object|array $property): array

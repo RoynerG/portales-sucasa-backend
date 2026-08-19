@@ -36,6 +36,8 @@ class WordPressHighlightServiceTest extends TestCase
             $table->string('direccion')->nullable();
             $table->string('id_funcionario')->nullable();
             $table->string('funcionario')->nullable();
+            $table->string('id_propietario')->nullable();
+            $table->string('propietario')->nullable();
             $table->unsignedBigInteger('fecha_destacado')->nullable();
             $table->string('destacado')->nullable();
             $table->string('marcado_destacado')->nullable();
@@ -108,6 +110,7 @@ class WordPressHighlightServiceTest extends TestCase
             $table->string('gestion')->nullable();
             $table->string('activo')->default('Si');
             $table->string('id_cargo');
+            $table->string('correo')->nullable();
             foreach (array_keys(WordPressHighlightService::MARKETS) as $market) {
                 $table->unsignedInteger($market)->default(0);
             }
@@ -117,6 +120,28 @@ class WordPressHighlightServiceTest extends TestCase
             $table->increments('_ID');
             $table->string('funcion');
             $table->string('valor');
+            $table->string('imagen')->nullable();
+        });
+
+        Schema::connection('wordpress')->create('wp_jet_cct_propietarios', function (Blueprint $table): void {
+            $table->increments('_ID');
+            $table->string('id_propietario');
+            $table->string('nombre')->nullable();
+            $table->string('nombre_juridico')->nullable();
+            $table->string('correo')->nullable();
+        });
+
+        Schema::connection('wordpress')->create('skc_notification_queue', function (Blueprint $table): void {
+            $table->id();
+            foreach (['project_code', 'source_module', 'channel', 'provider', 'destination', 'destination_name', 'subject', 'message_text', 'message_html', 'template_name', 'template_language', 'payload_json', 'meta_json', 'status', 'dedupe_key', 'locked_by', 'last_error', 'created_by'] as $column) {
+                $table->text($column)->nullable();
+            }
+            foreach (['priority', 'attempts', 'max_attempts'] as $column) {
+                $table->integer($column)->nullable();
+            }
+            foreach (['scheduled_at', 'next_attempt_at', 'locked_at', 'last_attempt_at', 'sent_at', 'created_at', 'updated_at'] as $column) {
+                $table->dateTime($column)->nullable();
+            }
         });
 
         $this->seedHighlights();
@@ -226,6 +251,31 @@ class WordPressHighlightServiceTest extends TestCase
         $this->assertSame('No', $property->marcado_destacado);
         $this->assertSame('destacado', DB::connection('wordpress')->table('wp_skc_destacado_solicitudes')->where('id', $request['id'])->value('estado'));
         $this->assertSame('Coordinador', DB::connection('wordpress')->table('wp_skc_destacado_solicitudes')->where('id', $request['id'])->value('completado_por_nombre'));
+    }
+
+    public function test_it_queues_owner_and_employee_emails_after_confirming_a_highlight(): void
+    {
+        DB::connection('wordpress')->table('wp_jet_cct_inmuebles')->where('codigo', '300')->update([
+            'id_propietario' => '900',
+            'propietario' => 'Propietaria Prueba',
+        ]);
+        DB::connection('wordpress')->table('wp_jet_cct_propietarios')->insert([
+            'id_propietario' => '900',
+            'nombre' => 'Propietaria Prueba',
+            'correo' => 'propietaria@example.com',
+        ]);
+        DB::connection('wordpress')->table('wp_jet_cct_funcionarios')->where('id_empleado', '10')->update(['correo' => 'asesora@example.com']);
+        $requestId = DB::connection('wordpress')->table('wp_skc_destacado_solicitudes')->where('codigo_inmueble', '300')->value('id');
+        $actor = new User(['name' => 'Coordinador', 'legacy_employee_id' => '77']);
+        $actor->id = 9;
+
+        $result = (new WordPressHighlightService)->completeRequest((string) $requestId, $actor);
+
+        $this->assertSame(2, $result['notifications']['queued']);
+        $this->assertSame(2, DB::connection('wordpress')->table('skc_notification_queue')->count());
+        $this->assertSame(['asesora@example.com', 'propietaria@example.com'], DB::connection('wordpress')->table('skc_notification_queue')->orderBy('destination')->pluck('destination')->all());
+        $this->assertSame(['portales-sucasa'], DB::connection('wordpress')->table('skc_notification_queue')->distinct()->pluck('project_code')->all());
+        $this->assertSame(2, DB::connection('wordpress')->table('skc_notification_queue')->where('status', 'pending')->count());
     }
 
     private function seedHighlights(): void

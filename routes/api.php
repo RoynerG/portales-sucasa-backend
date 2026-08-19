@@ -61,6 +61,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/properties/highlight-quota-limits', [PropertyHighlightController::class, 'updateQuotaLimits'])->middleware('portal-reset');
     Route::get('/properties/highlight-requests', [PropertyHighlightController::class, 'pending']);
     Route::post('/properties/highlight-requests/{highlightRequest}/complete', [PropertyHighlightController::class, 'complete'])->middleware('portal-reset');
+    Route::middleware('portal-reset')->group(function () {
+        Route::get('/properties/highlight-history', [PropertyHighlightController::class, 'history']);
+        Route::get('/properties/premium', [PropertyHighlightController::class, 'premium']);
+        Route::patch('/properties/{code}/premium', [PropertyHighlightController::class, 'updatePremium']);
+        Route::get('/properties/{code}/premium-reports', [PropertyHighlightController::class, 'premiumReports']);
+        Route::post('/properties/{code}/premium-reports', [PropertyHighlightController::class, 'storePremiumReport']);
+    });
     Route::delete('/properties/{code}/highlight', [PropertyHighlightController::class, 'destroy'])->middleware('portal-reset');
     Route::get('/properties/{code}', [PropertyController::class, 'show']);
     Route::patch('/properties/{code}', [PropertyController::class, 'update']);

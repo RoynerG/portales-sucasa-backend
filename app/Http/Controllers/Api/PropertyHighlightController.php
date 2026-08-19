@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\WordPressHighlightAdminService;
 use App\Services\WordPressHighlightService;
 use DomainException;
 use Illuminate\Http\JsonResponse;
@@ -11,7 +12,10 @@ use OutOfBoundsException;
 
 class PropertyHighlightController extends Controller
 {
-    public function __construct(private readonly WordPressHighlightService $highlights) {}
+    public function __construct(
+        private readonly WordPressHighlightService $highlights,
+        private readonly WordPressHighlightAdminService $administration,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -94,5 +98,64 @@ class PropertyHighlightController extends Controller
         }
 
         return response()->json(['Datos' => $result]);
+    }
+
+    public function history(Request $request): JsonResponse
+    {
+        abort_unless(config('sources.properties') === 'wordpress', 409, 'El historial de destacados requiere la fuente de WordPress.');
+
+        return response()->json(['Datos' => $this->administration->history($request->query())]);
+    }
+
+    public function premium(Request $request): JsonResponse
+    {
+        abort_unless(config('sources.properties') === 'wordpress', 409, 'La administración Premium requiere la fuente de WordPress.');
+
+        return response()->json(['Datos' => $this->administration->premium($request->query())]);
+    }
+
+    public function updatePremium(Request $request, string $code): JsonResponse
+    {
+        abort_unless(config('sources.properties') === 'wordpress', 409, 'La administración Premium requiere la fuente de WordPress.');
+        $validated = $request->validate(['enabled' => ['required', 'boolean']]);
+
+        try {
+            $result = $this->administration->togglePremium(trim($code), (bool) $validated['enabled'], $request->user());
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json(['Datos' => $result]);
+    }
+
+    public function premiumReports(string $code): JsonResponse
+    {
+        abort_unless(config('sources.properties') === 'wordpress', 409, 'Los reportes Premium requieren la fuente de WordPress.');
+
+        try {
+            $result = $this->administration->reports(trim($code));
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json(['Datos' => $result]);
+    }
+
+    public function storePremiumReport(Request $request, string $code): JsonResponse
+    {
+        abort_unless(config('sources.properties') === 'wordpress', 409, 'Los reportes Premium requieren la fuente de WordPress.');
+        $validated = $request->validate([
+            'type' => ['required', 'string', 'max:80'],
+            'observation' => ['required', 'string', 'min:10', 'max:3000'],
+            'date' => ['required', 'date_format:Y-m-d'],
+        ]);
+
+        try {
+            $result = $this->administration->addReport(trim($code), $validated['type'], trim($validated['observation']), $validated['date'], $request->user());
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json(['Datos' => $result], 201);
     }
 }

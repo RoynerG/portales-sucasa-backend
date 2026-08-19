@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Property;
+use App\Models\PropertySyncStatus;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -97,16 +98,17 @@ class WordPressPropertyRepository
             ->unique()
             ->values();
 
+        $portal = $this->selectedPortal($filters['portal'] ?? null);
+
         $latestStatuses = Property::query()
             ->whereIn('code', $codes)
-            ->with(['syncStatuses' => fn ($query) => $query->with('integration')->latest('updated_at')])
+            ->with(['syncStatuses' => fn ($query) => $query
+                ->forCurrentPortalEnvironment($portal)
+                ->with('integration')
+                ->latest('updated_at')])
             ->get()
             ->mapWithKeys(fn (Property $property) => [
                 $property->code => $property->syncStatuses
-                    ->filter(fn ($status) => $this->currentPortalEnvironment(
-                        $status->integration?->slug,
-                        $status->environment
-                    ))
                     ->groupBy(fn ($status) => $status->integration_id.':'.($status->portal_variant ?: 'default'))
                     ->map(fn (Collection $rows) => $rows->first())
                     ->values(),
@@ -306,22 +308,6 @@ class WordPressPropertyRepository
             ->where('cct_status', 'publish');
     }
 
-    protected function currentPortalEnvironment(?string $portal, ?string $environment): bool
-    {
-        if (! $portal || ! $environment) {
-            return true;
-        }
-
-        $expected = match ($portal) {
-            'ciencuadras' => config('portals.ciencuadras.environment', 'production'),
-            'mercadolibre' => config('portals.mercadolibre.environment', 'production'),
-            'fincaraiz' => config('portals.fincaraiz.environment', 'qa'),
-            default => 'production',
-        };
-
-        return $environment === $expected;
-    }
-
     protected function applyFilters(Builder $query, array $filters): void
     {
         if ($code = $filters['codigo'] ?? null) {
@@ -372,6 +358,53 @@ class WordPressPropertyRepository
         if ($neighborhood = $filters['barrio'] ?? null) {
             $query->where('barrio', $neighborhood);
         }
+
+        $portal = trim((string) ($filters['portal'] ?? ''));
+        $portalState = trim((string) ($filters['estado_portal'] ?? ''));
+        if ($portal !== '' || $portalState !== '') {
+            if ($portal !== '' && ! in_array($portal, PropertySyncStatus::PORTALS, true)) {
+                $query->whereRaw('1 = 0');
+
+                return;
+            }
+
+            if ($portalState === 'not_published') {
+                $publishedCodes = Property::query()
+                    ->withPortalState($portal, 'published')
+                    ->pluck('code')
+                    ->map(fn ($code) => trim((string) $code))
+                    ->filter()
+                    ->unique()
+                    ->values();
+
+                if ($publishedCodes->isNotEmpty()) {
+                    $query->whereNotIn('codigo', $publishedCodes->all());
+                }
+
+                return;
+            }
+
+            $codes = Property::query()
+                ->withPortalState($portal, $portalState)
+                ->pluck('code')
+                ->map(fn ($code) => trim((string) $code))
+                ->filter()
+                ->unique()
+                ->values();
+
+            if ($codes->isEmpty()) {
+                $query->whereRaw('1 = 0');
+            } else {
+                $query->whereIn('codigo', $codes->all());
+            }
+        }
+    }
+
+    protected function selectedPortal(mixed $portal): ?string
+    {
+        $value = trim((string) $portal);
+
+        return in_array($value, PropertySyncStatus::PORTALS, true) ? $value : null;
     }
 
     protected function applyOrdering(Builder $query, array $filters): void
@@ -492,7 +525,9 @@ class WordPressPropertyRepository
 
         return Property::query()
             ->whereIn('code', $codes)
-            ->with('syncStatuses.integration')
+            ->with(['syncStatuses' => fn ($query) => $query
+                ->forCurrentPortalEnvironment()
+                ->with('integration')])
             ->get()
             ->mapWithKeys(fn (Property $property) => [
                 $property->code => $property->syncStatuses->map(fn ($status) => [

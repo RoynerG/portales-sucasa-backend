@@ -154,6 +154,51 @@ class Property extends Model
         return $q;
     }
 
+    public function scopeWithPortalState(Builder $query, ?string $portal, ?string $state): Builder
+    {
+        $portal = trim((string) $portal);
+        $state = trim((string) $state);
+
+        if ($portal !== '' && ! in_array($portal, PropertySyncStatus::PORTALS, true)) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        if ($portal === '' && $state === '') {
+            return $query;
+        }
+
+        $statusConstraint = function (Builder $statuses, ?array $states = null) use ($portal): void {
+            $statuses->forCurrentPortalEnvironment($portal ?: null);
+            if ($states !== null) {
+                $statuses->whereIn('sync_status', $states);
+            }
+        };
+
+        if ($state === 'not_published') {
+            return $query->whereDoesntHave(
+                'syncStatuses',
+                fn (Builder $statuses) => $statusConstraint($statuses, ['synced'])
+            );
+        }
+
+        $states = match ($state) {
+            'published' => ['synced'],
+            'updating' => ['pending', 'syncing'],
+            'error' => ['error'],
+            'paused' => ['paused', 'closed'],
+            default => null,
+        };
+
+        if ($state !== '' && $states === null) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->whereHas(
+            'syncStatuses',
+            fn (Builder $statuses) => $statusConstraint($statuses, $states)
+        );
+    }
+
     // Accesores
     public function getDisplayPriceAttribute(): ?float
     {

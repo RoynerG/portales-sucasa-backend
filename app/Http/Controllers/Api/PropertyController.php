@@ -21,7 +21,10 @@ class PropertyController extends Controller
         }
 
         $query = Property::query()
-            ->with(['city', 'neighborhood', 'propertyType', 'transactionType', 'consultant', 'images', 'syncStatuses.integration']);
+            ->with([
+                'city', 'neighborhood', 'propertyType', 'transactionType', 'consultant', 'images',
+                'syncStatuses' => fn ($query) => $query->forCurrentPortalEnvironment()->with('integration'),
+            ]);
 
         $this->applyPropertyFilters($query, $request);
 
@@ -52,7 +55,8 @@ class PropertyController extends Controller
         $property = Property::with([
             'city', 'neighborhood', 'propertyType', 'transactionType',
             'consultant', 'images', 'videos', 'floorPlans',
-            'features', 'syncStatuses.integration',
+            'features',
+            'syncStatuses' => fn ($query) => $query->forCurrentPortalEnvironment()->with('integration'),
         ])->where('code', $code)->firstOrFail();
 
         return response()->json(['Datos' => [new PropertyResource($property)]]);
@@ -85,9 +89,12 @@ class PropertyController extends Controller
 
         $query = Property::query();
         $this->applyPropertyFilters($query, $request);
+        $portal = $this->selectedPortal($request->query('portal'));
 
         $properties = $query
-            ->with(['syncStatuses' => fn ($query) => $query->latest('updated_at')])
+            ->with(['syncStatuses' => fn ($query) => $query
+                ->forCurrentPortalEnvironment($portal)
+                ->latest('updated_at')])
             ->get();
 
         return response()->json(['Datos' => [
@@ -266,6 +273,18 @@ class PropertyController extends Controller
         if ($bedrooms = $request->query('habitaciones')) {
             $query->where('bedrooms', '>=', (int) $bedrooms);
         }
+
+        $query->withPortalState(
+            $request->query('portal'),
+            $request->query('estado_portal')
+        );
+    }
+
+    private function selectedPortal(mixed $portal): ?string
+    {
+        $value = trim((string) $portal);
+
+        return in_array($value, PropertySyncStatus::PORTALS, true) ? $value : null;
     }
 
     private function attachFeatures(Property $property, Request $request): void

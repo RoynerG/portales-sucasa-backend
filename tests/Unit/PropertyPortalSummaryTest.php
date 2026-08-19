@@ -19,6 +19,8 @@ class PropertyPortalSummaryTest extends TestCase
             'tipo_negocio' => 'Venta',
             'destinacion' => 'Vivienda',
             'funcionario_id' => '8',
+            'portal' => 'fincaraiz',
+            'estado_portal' => 'error',
         ];
         $expected = [
             'total' => 3,

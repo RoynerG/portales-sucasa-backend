@@ -57,9 +57,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/properties/distribution', [PropertyController::class, 'distribution']);
     Route::get('/properties/highlights', [PropertyHighlightController::class, 'index']);
     Route::get('/properties/highlight-quotas', [PropertyHighlightController::class, 'quotas']);
+    Route::get('/properties/my-highlight-quotas', [PropertyHighlightController::class, 'myQuotas']);
     Route::patch('/properties/highlight-quotas/{employee}', [PropertyHighlightController::class, 'updateQuotas'])->middleware('portal-reset');
     Route::patch('/properties/highlight-quota-limits', [PropertyHighlightController::class, 'updateQuotaLimits'])->middleware('portal-reset');
     Route::get('/properties/highlight-requests', [PropertyHighlightController::class, 'pending']);
+    Route::post('/properties/{code}/highlight-requests', [PropertyHighlightController::class, 'storeRequest']);
     Route::post('/properties/highlight-requests/{highlightRequest}/complete', [PropertyHighlightController::class, 'complete'])->middleware('portal-reset');
     Route::middleware('portal-reset')->group(function () {
         Route::get('/properties/highlight-history', [PropertyHighlightController::class, 'history']);

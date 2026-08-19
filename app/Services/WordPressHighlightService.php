@@ -186,6 +186,135 @@ class WordPressHighlightService
         ];
     }
 
+    public function quotasForUser(User $user): array
+    {
+        $employeeId = trim((string) ($user->legacy_employee_id ?: ''));
+        if ($employeeId === '') {
+            throw new DomainException('Tu usuario no está enlazado con un funcionario y no puede usar cupos de destacados.');
+        }
+
+        $employee = DB::connection('wordpress')
+            ->table('wp_jet_cct_funcionarios')
+            ->where('id_empleado', $employeeId)
+            ->where(function (Builder $query): void {
+                $query->whereNull('activo')
+                    ->orWhere('activo', '')
+                    ->orWhereIn(DB::raw("LOWER(TRIM(activo))"), ['1', 'si', 'sí', 'yes', 'true', 'activo', 'activa']);
+            })
+            ->first();
+        if (! $employee) {
+            throw new DomainException('No se encontró una configuración activa de cupos para tu funcionario.');
+        }
+
+        $usage = $this->quotaUsage([$employeeId]);
+
+        return $this->mapQuotaEmployee($employee, $usage);
+    }
+
+    public function requestHighlight(
+        string $code,
+        string $portal,
+        string $reason,
+        bool $opportunity,
+        bool $negotiable,
+        User $actor,
+    ): array {
+        if (! isset(self::MARKETS[$portal])) {
+            throw new DomainException('Selecciona un mercado de destacado válido.');
+        }
+
+        $reason = trim($reason);
+        if (mb_strlen($reason) < 3) {
+            throw new DomainException('Escribe una razón de al menos 3 caracteres.');
+        }
+
+        $employeeId = trim((string) ($actor->legacy_employee_id ?: ''));
+        if ($employeeId === '') {
+            throw new DomainException('Tu usuario no está enlazado con un funcionario y no puede usar cupos de destacados.');
+        }
+
+        return DB::connection('wordpress')->transaction(function () use ($code, $portal, $reason, $opportunity, $negotiable, $actor, $employeeId): array {
+            $property = DB::connection('wordpress')
+                ->table('wp_jet_cct_inmuebles')
+                ->where(function (Builder $query) use ($code): void {
+                    $query->where('codigo', $code);
+                    if (ctype_digit($code)) {
+                        $query->orWhere('_ID', (int) $code);
+                    }
+                })
+                ->lockForUpdate()
+                ->first();
+            if (! $property || (string) ($property->estado ?? '') !== 'Publico') {
+                throw new DomainException('Solo se puede solicitar destacado para un inmueble público.');
+            }
+            if (self::marketsFor($property) !== [] || self::isAffirmative($property->destacado ?? null)) {
+                throw new DomainException('El inmueble ya tiene un destacado activo. Libera primero el cupo actual.');
+            }
+
+            $propertyCode = trim((string) (($property->codigo ?? '') ?: $property->_ID));
+            $pendingRequest = DB::connection('wordpress')
+                ->table('wp_skc_destacado_solicitudes')
+                ->where('codigo_inmueble', $propertyCode)
+                ->where('estado', 'pendiente')
+                ->lockForUpdate()
+                ->first();
+            if ($pendingRequest) {
+                $pendingMarket = self::MARKETS[$pendingRequest->portal]['label'] ?? (string) $pendingRequest->portal;
+                throw new DomainException("El inmueble ya tiene una solicitud pendiente en {$pendingMarket}.");
+            }
+
+            $employee = DB::connection('wordpress')
+                ->table('wp_jet_cct_funcionarios')
+                ->where('id_empleado', $employeeId)
+                ->where(function (Builder $query): void {
+                    $query->whereNull('activo')
+                        ->orWhere('activo', '')
+                        ->orWhereIn(DB::raw("LOWER(TRIM(activo))"), ['1', 'si', 'sí', 'yes', 'true', 'activo', 'activa']);
+                })
+                ->lockForUpdate()
+                ->first();
+            if (! $employee) {
+                throw new DomainException('No se encontraron cupos configurados para tu funcionario.');
+            }
+
+            $market = self::MARKETS[$portal];
+            $assigned = max(0, (int) ($employee->{$portal} ?? 0));
+            $usage = $this->quotaUsage([$employeeId])[$employeeId][$portal] ?? ['used' => 0, 'pending' => 0];
+            $used = (int) ($usage['used'] ?? 0);
+            $pending = (int) ($usage['pending'] ?? 0);
+            $available = max(0, $assigned - $used - $pending);
+            if ($available <= 0) {
+                throw new DomainException("No tienes cupos disponibles de {$market['label']}. Asignados: {$assigned}, usados: {$used}, pendientes: {$pending}.");
+            }
+
+            $requestId = DB::connection('wordpress')->table('wp_skc_destacado_solicitudes')->insertGetId([
+                'codigo_inmueble' => $propertyCode,
+                'portal' => $portal,
+                'razon' => $reason,
+                'oportunidad' => $opportunity ? 'Si' : 'No',
+                'negociable' => $negotiable ? 'Si' : 'No',
+                'estado' => 'pendiente',
+                'solicitado_por_id' => $employeeId,
+                'solicitado_por_nombre' => $actor->name ?: (string) ($employee->nombre ?? 'Funcionario'),
+                'requested_at' => now(),
+            ]);
+
+            DB::connection('wordpress')->table('wp_jet_cct_inmuebles')->where('_ID', $property->_ID)->update([
+                'marcado_destacado' => 'Si',
+                'fecha_destacado' => time(),
+            ]);
+
+            return [
+                'request_id' => (string) $requestId,
+                'code' => $propertyCode,
+                'market' => $portal,
+                'market_label' => $market['label'],
+                'available_after_request' => $available - 1,
+                'message' => "Solicitud de destacado enviada para {$propertyCode} en {$market['label']}.",
+            ];
+        });
+    }
+
     public function updateQuotas(string $employeeRecordId, array $values): array
     {
         return DB::connection('wordpress')->transaction(function () use ($employeeRecordId, $values): array {

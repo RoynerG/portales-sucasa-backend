@@ -369,6 +369,8 @@ class WordPressPropertyRepository
             $query->where('barrio', $neighborhood);
         }
 
+        $this->applyHighlightFilter($query, trim((string) ($filters['destacado'] ?? '')));
+
         $portal = trim((string) ($filters['portal'] ?? ''));
         $portalState = trim((string) ($filters['estado_portal'] ?? ''));
         if ($portal !== '' || $portalState !== '') {
@@ -408,6 +410,46 @@ class WordPressPropertyRepository
                 $query->whereIn('codigo', $codes->all());
             }
         }
+    }
+
+    protected function applyHighlightFilter(Builder $query, string $state): void
+    {
+        if (! in_array($state, ['active', 'pending', 'none'], true)) {
+            return;
+        }
+
+        $affirmative = ['1', 'si', 'sí', 'yes', 'true', 'activo', 'activa', 'destacado', 'promocionado'];
+        $activeColumns = [
+            'destacado',
+            ...array_values(array_map(
+                fn (array $market): string => $market['property_column'],
+                WordPressHighlightService::MARKETS,
+            )),
+        ];
+        $normalized = static fn (string $column) => DB::raw("LOWER(TRIM(COALESCE({$column}, '')))");
+
+        if ($state === 'active') {
+            $query->where(function (Builder $highlighted) use ($activeColumns, $affirmative, $normalized): void {
+                $highlighted->whereIn($normalized(array_shift($activeColumns)), $affirmative);
+                foreach ($activeColumns as $column) {
+                    $highlighted->orWhereIn($normalized($column), $affirmative);
+                }
+            });
+
+            return;
+        }
+
+        foreach ($activeColumns as $column) {
+            $query->whereNotIn($normalized($column), $affirmative);
+        }
+
+        if ($state === 'pending') {
+            $query->whereIn($normalized('marcado_destacado'), $affirmative);
+
+            return;
+        }
+
+        $query->whereNotIn($normalized('marcado_destacado'), $affirmative);
     }
 
     protected function selectedPortal(mixed $portal): ?string

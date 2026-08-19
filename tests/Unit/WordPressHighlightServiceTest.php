@@ -269,6 +269,50 @@ class WordPressHighlightServiceTest extends TestCase
         $this->assertSame('Coordinador', DB::connection('wordpress')->table('wp_skc_destacado_solicitudes')->where('id', $request['id'])->value('completado_por_nombre'));
     }
 
+    public function test_any_linked_user_with_available_quotas_can_request_a_highlight(): void
+    {
+        DB::connection('wordpress')->table('wp_jet_cct_inmuebles')->insert([
+            'codigo' => '400',
+            'estado' => 'Publico',
+            'destacado' => 'No',
+            'marcado_destacado' => 'No',
+            'mercado_libre_destacado' => 'No',
+            'proppit_promocionado' => 'No',
+            'ciencuadras_ascendido' => 'No',
+            'ciencuadras_destacado' => 'No',
+            'finca_raiz_silver' => 'No',
+            'finca_raiz_gold' => 'No',
+            'finca_raiz_black' => 'No',
+        ]);
+        $actor = new User(['name' => 'Administradora con cupos', 'legacy_employee_id' => '10']);
+        $actor->id = 99;
+        $service = new WordPressHighlightService;
+
+        $before = $service->quotasForUser($actor);
+        $result = $service->requestHighlight('400', 'mercado_libre_destacados', 'Buena oportunidad', true, true, $actor);
+        $after = $service->quotasForUser($actor);
+
+        $this->assertSame(1, $before['markets']['mercado_libre_destacados']['available']);
+        $this->assertSame(0, $result['available_after_request']);
+        $this->assertSame(0, $after['markets']['mercado_libre_destacados']['available']);
+        $this->assertSame(2, $after['markets']['mercado_libre_destacados']['pending']);
+        $this->assertSame('pendiente', DB::connection('wordpress')->table('wp_skc_destacado_solicitudes')->where('codigo_inmueble', '400')->value('estado'));
+        $this->assertSame('10', DB::connection('wordpress')->table('wp_skc_destacado_solicitudes')->where('codigo_inmueble', '400')->value('solicitado_por_id'));
+        $this->assertSame('Si', DB::connection('wordpress')->table('wp_jet_cct_inmuebles')->where('codigo', '400')->value('marcado_destacado'));
+    }
+
+    public function test_it_rejects_a_highlight_request_when_the_user_has_no_quota_for_the_market(): void
+    {
+        DB::connection('wordpress')->table('wp_jet_cct_inmuebles')->where('codigo', '300')->update(['marcado_destacado' => 'No']);
+        DB::connection('wordpress')->table('wp_skc_destacado_solicitudes')->where('codigo_inmueble', '300')->delete();
+        $actor = new User(['name' => 'Asesor sin cupo ML', 'legacy_employee_id' => '20']);
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('No tienes cupos disponibles de Mercado Libre');
+
+        (new WordPressHighlightService)->requestHighlight('300', 'mercado_libre_destacados', 'Precio', true, false, $actor);
+    }
+
     public function test_it_queues_owner_and_employee_emails_after_confirming_a_highlight(): void
     {
         DB::connection('wordpress')->table('wp_jet_cct_inmuebles')->where('codigo', '300')->update([

@@ -44,6 +44,45 @@ class PropertyHighlightController extends Controller
         return response()->json(['Datos' => $this->highlights->quotas($request->query())]);
     }
 
+    public function myQuotas(Request $request): JsonResponse
+    {
+        abort_unless(config('sources.properties') === 'wordpress', 409, 'La administración de cupos requiere la fuente de WordPress.');
+
+        try {
+            $result = $this->highlights->quotasForUser($request->user());
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json(['Datos' => $result]);
+    }
+
+    public function storeRequest(Request $request, string $code): JsonResponse
+    {
+        abort_unless(config('sources.properties') === 'wordpress', 409, 'La administración de solicitudes requiere la fuente de WordPress.');
+        $validated = $request->validate([
+            'portal' => ['required', 'string', 'max:80'],
+            'reason' => ['required', 'string', 'min:3', 'max:500'],
+            'opportunity' => ['required', 'boolean'],
+            'negotiable' => ['required', 'boolean'],
+        ]);
+
+        try {
+            $result = $this->highlights->requestHighlight(
+                trim($code),
+                (string) $validated['portal'],
+                (string) $validated['reason'],
+                (bool) $validated['opportunity'],
+                (bool) $validated['negotiable'],
+                $request->user(),
+            );
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json(['Datos' => $result], 201);
+    }
+
     public function updateQuotas(Request $request, string $employee): JsonResponse
     {
         abort_unless(config('sources.properties') === 'wordpress', 409, 'La administración de cupos requiere la fuente de WordPress.');

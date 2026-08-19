@@ -13,6 +13,7 @@ class PropertyPortalSummaryTest extends TestCase
     public function test_portal_summary_forwards_the_active_property_filters(): void
     {
         $filters = [
+            'vista_estado' => 'public',
             'codigo' => 'Manga',
             'estado' => 'active',
             'tipo_inmueble' => 'Apartamento',

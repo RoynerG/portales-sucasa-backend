@@ -199,6 +199,19 @@ class Property extends Model
         );
     }
 
+    public function scopeInCatalogView(Builder $query, ?string $view): Builder
+    {
+        return match (trim((string) $view)) {
+            'public' => $query->where('status', 'active'),
+            'other' => $query->where(
+                fn (Builder $states) => $states
+                    ->whereNull('status')
+                    ->orWhere('status', '<>', 'active')
+            ),
+            default => $query,
+        };
+    }
+
     // Accesores
     public function getDisplayPriceAttribute(): ?float
     {

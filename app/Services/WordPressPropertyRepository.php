@@ -310,6 +310,16 @@ class WordPressPropertyRepository
 
     protected function applyFilters(Builder $query, array $filters): void
     {
+        $catalogView = trim((string) ($filters['vista_estado'] ?? ''));
+        if ($catalogView === 'public') {
+            $query->where('estado', 'Publico');
+        } elseif ($catalogView === 'other') {
+            $query->where(function (Builder $states): void {
+                $states->whereNull('estado')
+                    ->orWhere('estado', '<>', 'Publico');
+            });
+        }
+
         if ($code = $filters['codigo'] ?? null) {
             $query->where(function (Builder $q) use ($code) {
                 $q->where('codigo', 'like', "%{$code}%")

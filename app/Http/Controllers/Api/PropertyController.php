@@ -238,6 +238,8 @@ class PropertyController extends Controller
 
     private function applyPropertyFilters($query, Request $request): void
     {
+        $query->inCatalogView($request->query('vista_estado'));
+
         if ($code = $request->query('codigo')) {
             $query->where(function ($q) use ($code) {
                 $q->where('code', 'like', "%{$code}%")

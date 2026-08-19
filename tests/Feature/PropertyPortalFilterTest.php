@@ -23,6 +23,7 @@ class PropertyPortalFilterTest extends TestCase
             $table->id();
             $table->string('code')->unique();
             $table->string('title');
+            $table->string('status')->nullable();
             $table->timestamps();
             $table->softDeletes();
         });
@@ -67,6 +68,22 @@ class PropertyPortalFilterTest extends TestCase
         $this->assertSame(['100', '200'], $this->codes('fincaraiz', null));
         $this->assertSame(['100', '300', '400'], $this->codes('fincaraiz', 'not_published'));
         $this->assertSame([], $this->codes('portal-invalido', 'error'));
+    }
+
+    public function test_it_separates_public_properties_from_other_catalog_states(): void
+    {
+        Property::create(['code' => '100', 'title' => 'Público', 'status' => 'active']);
+        Property::create(['code' => '200', 'title' => 'Arrendado', 'status' => 'rented']);
+        Property::create(['code' => '300', 'title' => 'Sin estado', 'status' => null]);
+
+        $this->assertSame(
+            ['100'],
+            Property::query()->inCatalogView('public')->orderBy('code')->pluck('code')->all()
+        );
+        $this->assertSame(
+            ['200', '300'],
+            Property::query()->inCatalogView('other')->orderBy('code')->pluck('code')->all()
+        );
     }
 
     private function createStatus(

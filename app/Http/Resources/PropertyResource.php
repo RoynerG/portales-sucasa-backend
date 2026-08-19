@@ -2,12 +2,15 @@
 
 namespace App\Http\Resources;
 
+use App\Services\PortalErrorSummarizer;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 class PropertyResource extends JsonResource
 {
     public function toArray($request): array
     {
+        $errorSummarizer = app(PortalErrorSummarizer::class);
+
         return [
             'id' => $this->id,
             'code' => $this->code,
@@ -104,6 +107,9 @@ class PropertyResource extends JsonResource
                 'external_url' => $s->external_url,
                 'last_response' => $s->last_response,
                 'last_error' => $s->last_error,
+                'error_summary' => $s->sync_status === 'error'
+                    ? $errorSummarizer->summarize($s->last_error, $s->last_response ?? [], $s->sync_status)
+                    : null,
                 'last_synced_at' => $s->last_synced_at?->toIso8601String(),
             ])
             ),

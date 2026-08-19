@@ -512,6 +512,7 @@ class WordPressPropertyRepository
 
     protected function syncStatuses(Collection $rows): array
     {
+        $errorSummarizer = app(PortalErrorSummarizer::class);
         $codes = $rows
             ->pluck('codigo')
             ->map(fn ($code) => (string) $code)
@@ -540,6 +541,13 @@ class WordPressPropertyRepository
                     'external_url' => $status->external_url,
                     'last_response' => $status->last_response,
                     'last_error' => $status->last_error,
+                    'error_summary' => $status->sync_status === 'error'
+                        ? $errorSummarizer->summarize(
+                            $status->last_error,
+                            $status->last_response ?? [],
+                            $status->sync_status
+                        )
+                        : null,
                     'last_synced_at' => $status->last_synced_at?->toIso8601String(),
                 ])->values()->all(),
             ])

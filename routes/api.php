@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\CatalogController;
 use App\Http\Controllers\Api\ConsultantController;
 use App\Http\Controllers\Api\IntegrationController;
 use App\Http\Controllers\Api\PropertyController;
+use App\Http\Controllers\Api\PropertyHighlightController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Portal\CiencuadrasController;
@@ -54,6 +55,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/properties/stats', [PropertyController::class, 'statsByStatus']);
     Route::get('/properties/portal-summary', [PropertyController::class, 'portalSummary']);
     Route::get('/properties/distribution', [PropertyController::class, 'distribution']);
+    Route::get('/properties/highlights', [PropertyHighlightController::class, 'index']);
+    Route::delete('/properties/{code}/highlight', [PropertyHighlightController::class, 'destroy'])->middleware('portal-reset');
     Route::get('/properties/{code}', [PropertyController::class, 'show']);
     Route::patch('/properties/{code}', [PropertyController::class, 'update']);
     Route::delete('/properties/{code}', [PropertyController::class, 'destroy']);

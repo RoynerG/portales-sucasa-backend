@@ -455,6 +455,7 @@ class WordPressPropertyRepository
         ])->values() : collect();
 
         $displayPrice = $this->money($row->precio_arriendo) ?: $this->money($row->precio_venta);
+        $highlightMarkets = WordPressHighlightService::marketsFor($row);
 
         return [
             'id' => (int) $row->_ID,
@@ -490,6 +491,10 @@ class WordPressPropertyRepository
             'status' => $this->mapStatus($row->estado),
             'legacy_status' => $row->estado,
             'featured' => $this->yesNo($row->destacado) || $this->yesNo($row->marcado_destacado),
+            'highlighted' => $highlightMarkets !== [] || $this->yesNo($row->destacado ?? null),
+            'highlight_pending' => $highlightMarkets === [] && $this->yesNo($row->marcado_destacado ?? null),
+            'highlight_markets' => $highlightMarkets,
+            'highlighted_at' => $this->timestamp($row->fecha_destacado ?? null),
             'published_at' => $this->timestamp($row->fecha_publicacion),
             'consultant' => $row->funcionario,
             'consultant_id' => $row->id_funcionario,

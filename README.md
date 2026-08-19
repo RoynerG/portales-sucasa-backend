@@ -283,6 +283,8 @@ backend/
 | GET    | `/api/properties/highlight-quotas` | sí | Límites, asignación, uso y disponibilidad de cupos |
 | PATCH  | `/api/properties/highlight-quotas/{employee}` | sí (administración) | Actualizar cupos por mercado de un funcionario |
 | PATCH  | `/api/properties/highlight-quota-limits` | sí (administración) | Actualizar los límites generales en `confi_sistema` |
+| GET    | `/api/properties/highlight-requests` | sí | Listar solicitudes pendientes por destacar |
+| POST   | `/api/properties/highlight-requests/{request}/complete` | sí (administración) | Confirmar el destacado local y consumir el cupo |
 | DELETE | `/api/properties/{code}/highlight` | sí (administración) | Liberar el cupo local conservando el historial |
 | POST   | `/api/properties/{code}/sync/{portal}` | sí | Actualizar sync_status |
 | GET    | `/api/integrations` | sí | Listar portales activos |

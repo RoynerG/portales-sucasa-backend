@@ -255,6 +255,197 @@ class WordPressHighlightService
         });
     }
 
+    public function pendingRequests(array $filters = []): array
+    {
+        $page = max(1, (int) ($filters['pagina'] ?? 1));
+        $limit = min(100, max(10, (int) ($filters['limite'] ?? 25)));
+        $query = $this->pendingRequestsQuery();
+        $search = trim((string) ($filters['buscar'] ?? ''));
+        if ($search !== '') {
+            $query->where(function (Builder $where) use ($search): void {
+                $where->where('s.codigo_inmueble', 'like', "%{$search}%")
+                    ->orWhere('s.solicitado_por_nombre', 'like', "%{$search}%")
+                    ->orWhere('i.tipo_inmueble', 'like', "%{$search}%")
+                    ->orWhere('i.ciudad', 'like', "%{$search}%")
+                    ->orWhere('i.barrio', 'like', "%{$search}%");
+            });
+        }
+        $market = trim((string) ($filters['mercado'] ?? ''));
+        if ($market !== '' && isset(self::MARKETS[$market])) {
+            $query->where('s.portal', $market);
+        }
+
+        $total = (clone $query)->count('s.id');
+        $pages = max(1, (int) ceil($total / $limit));
+        $page = min($page, $pages);
+        $items = $query
+            ->orderBy('s.requested_at')
+            ->orderBy('s.id')
+            ->forPage($page, $limit)
+            ->get()
+            ->map(fn (stdClass $row): array => [
+                'id' => (string) $row->id,
+                'code' => (string) $row->codigo_inmueble,
+                'market' => (string) $row->portal,
+                'market_label' => self::MARKETS[$row->portal]['label'] ?? (string) $row->portal,
+                'property_type' => $row->tipo_inmueble,
+                'transaction_type' => $row->tipo_negocio,
+                'city' => $row->ciudad,
+                'neighborhood' => $row->barrio,
+                'address' => $row->direccion,
+                'property_status' => $row->inmueble_estado,
+                'requested_by_id' => (string) ($row->solicitado_por_id ?? ''),
+                'requested_by' => $row->solicitado_por_nombre,
+                'reason' => $row->razon,
+                'opportunity' => $row->oportunidad,
+                'negotiable' => $row->negociable,
+                'requested_at' => $this->timestamp($row->requested_at),
+            ])
+            ->values()
+            ->all();
+
+        $summaryQuery = $this->pendingRequestsQuery();
+
+        return [
+            'items' => $items,
+            'pagination' => [
+                'page' => $page,
+                'pages' => $pages,
+                'limit' => $limit,
+                'total' => $total,
+                'from' => $total > 0 ? (($page - 1) * $limit) + 1 : 0,
+                'to' => min($total, $page * $limit),
+            ],
+            'summary' => [
+                'total' => (clone $summaryQuery)->count('s.id'),
+                'markets' => collect(self::MARKETS)->mapWithKeys(fn (array $info, string $key): array => [
+                    $key => (clone $summaryQuery)->where('s.portal', $key)->count('s.id'),
+                ])->all(),
+            ],
+            'markets' => $this->marketOptions(),
+        ];
+    }
+
+    public function completeRequest(string $requestId, User $actor): array
+    {
+        return DB::connection('wordpress')->transaction(function () use ($requestId, $actor): array {
+            $request = DB::connection('wordpress')
+                ->table('wp_skc_destacado_solicitudes')
+                ->where('id', $requestId)
+                ->where('estado', 'pendiente')
+                ->lockForUpdate()
+                ->first();
+            if (! $request) {
+                throw new DomainException('La solicitud ya no está pendiente o no existe.');
+            }
+            $portal = (string) $request->portal;
+            if (! isset(self::MARKETS[$portal])) {
+                throw new DomainException('La solicitud tiene un mercado de destacado inválido.');
+            }
+
+            $property = DB::connection('wordpress')
+                ->table('wp_jet_cct_inmuebles')
+                ->where('codigo', (string) $request->codigo_inmueble)
+                ->lockForUpdate()
+                ->first();
+            if (! $property) {
+                throw new DomainException('No se encontró el inmueble de la solicitud.');
+            }
+
+            $market = self::MARKETS[$portal];
+            if (self::isAffirmative($property->{$market['property_column']} ?? null)) {
+                throw new DomainException('El inmueble ya tiene activo este destacado. Actualiza la cola antes de continuar.');
+            }
+
+            $requesterId = (string) ($request->solicitado_por_id ?? '');
+            $requesterName = (string) ($request->solicitado_por_nombre ?? 'Funcionario');
+            $quota = DB::connection('wordpress')
+                ->table('wp_jet_cct_funcionarios')
+                ->where('id_empleado', $requesterId)
+                ->lockForUpdate()
+                ->first();
+            if (! $quota) {
+                throw new DomainException("No se encontraron cupos configurados para {$requesterName}.");
+            }
+            $assigned = max(0, (int) ($quota->{$portal} ?? 0));
+            $used = DB::connection('wordpress')
+                ->table('wp_jet_cct_inmuebles')
+                ->where('id_funcionario', $requesterId)
+                ->where('estado', 'Publico')
+                ->where($market['property_column'], 'Si')
+                ->count();
+            if ($assigned <= 0 || $used >= $assigned) {
+                throw new DomainException("No hay cupos disponibles de {$market['label']} para {$requesterName}. Asignados: {$assigned}, usados: {$used}.");
+            }
+
+            $propertyCode = (string) (($property->codigo ?? '') ?: $property->_ID);
+            $highlightCount = DB::connection('wordpress')
+                ->table('wp_jet_cct_inmuebles_destacados')
+                ->where('id_inmueble', $propertyCode)
+                ->pluck('veces_destacado')
+                ->map(fn ($value): int => (int) $value)
+                ->max() + 1;
+            $now = time();
+            $propertyUpdates = [
+                'fecha_destacado' => $now,
+                'oportunidad' => (string) ($request->oportunidad ?? ''),
+                'negociable' => (string) ($request->negociable ?? ''),
+                'destacado' => 'Si',
+                'marcado_destacado' => 'No',
+            ];
+            foreach (self::MARKETS as $marketInfo) {
+                $propertyUpdates[$marketInfo['property_column']] = 'No';
+            }
+            $propertyUpdates[$market['property_column']] = 'Si';
+            DB::connection('wordpress')->table('wp_jet_cct_inmuebles')->where('_ID', $property->_ID)->update($propertyUpdates);
+
+            $history = [
+                'fecha' => $now,
+                'id_inmueble' => $propertyCode,
+                'id_empleado' => $requesterId,
+                'empleado' => $requesterName,
+                'cct_author_id' => (int) $requesterId,
+                'cct_created' => now(),
+                'observacion_destacado' => (string) ($request->razon ?? ''),
+                'veces_destacado' => (string) $highlightCount,
+                'oportunidad' => (string) ($request->oportunidad ?? ''),
+                'negociable' => (string) ($request->negociable ?? ''),
+            ];
+            foreach (self::MARKETS as $key => $marketInfo) {
+                $history[$marketInfo['history_column']] = $key === $portal ? 'Si' : 'No';
+            }
+            DB::connection('wordpress')->table('wp_jet_cct_inmuebles_destacados')->insert($history);
+
+            DB::connection('wordpress')->table('wp_jet_cct_historial_del_inmueble')->insert([
+                'fecha' => $now,
+                'id_inmueble' => $propertyCode,
+                'id_empleado' => $requesterId,
+                'funcionario' => $requesterName,
+                'tipo_reporte' => 'Destacado',
+                'observacion' => 'Su inmueble ha sido destacado para mayor promoción y visibilidad.',
+                'cct_author_id' => (int) $requesterId,
+                'cct_created' => now(),
+                'cct_modified' => now(),
+            ]);
+
+            $actorId = (string) ($actor->legacy_employee_id ?: $actor->id);
+            DB::connection('wordpress')->table('wp_skc_destacado_solicitudes')->where('id', $request->id)->update([
+                'estado' => 'destacado',
+                'completado_por_id' => $actorId,
+                'completado_por_nombre' => $actor->name ?: 'Funcionario',
+                'completed_at' => now(),
+            ]);
+
+            return [
+                'request_id' => (string) $request->id,
+                'code' => $propertyCode,
+                'market' => $portal,
+                'market_label' => $market['label'],
+                'message' => "Solicitud {$propertyCode} marcada como destacada en {$market['label']}.",
+            ];
+        });
+    }
+
     public static function marketsFor(object|array $property): array
     {
         return collect(self::MARKETS)
@@ -406,6 +597,42 @@ class WordPressHighlightService
                 }
             })
             ->count();
+    }
+
+    private function pendingRequestsQuery(): Builder
+    {
+        return DB::connection('wordpress')
+            ->table('wp_skc_destacado_solicitudes as s')
+            ->leftJoin('wp_jet_cct_inmuebles as i', 'i.codigo', '=', 's.codigo_inmueble')
+            ->where('s.estado', 'pendiente')
+            ->where(function (Builder $query): void {
+                foreach (self::MARKETS as $key => $market) {
+                    $query->orWhere(function (Builder $portal) use ($key, $market): void {
+                        $portal->where('s.portal', $key)
+                            ->where(function (Builder $inactive) use ($market): void {
+                                $inactive->whereNull('i.'.$market['property_column'])
+                                    ->orWhere('i.'.$market['property_column'], '<>', 'Si');
+                            });
+                    });
+                }
+            })
+            ->select([
+                's.id',
+                's.codigo_inmueble',
+                's.portal',
+                's.solicitado_por_id',
+                's.solicitado_por_nombre',
+                's.razon',
+                's.oportunidad',
+                's.negociable',
+                's.requested_at',
+                'i.tipo_inmueble',
+                'i.tipo_negocio',
+                'i.ciudad',
+                'i.barrio',
+                'i.direccion',
+                'i.estado as inmueble_estado',
+            ]);
     }
 
     private function consultants(): array

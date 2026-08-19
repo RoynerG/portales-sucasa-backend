@@ -75,4 +75,24 @@ class PropertyHighlightController extends Controller
 
         return response()->json(['Datos' => $result]);
     }
+
+    public function pending(Request $request): JsonResponse
+    {
+        abort_unless(config('sources.properties') === 'wordpress', 409, 'La administración de solicitudes requiere la fuente de WordPress.');
+
+        return response()->json(['Datos' => $this->highlights->pendingRequests($request->query())]);
+    }
+
+    public function complete(Request $request, string $highlightRequest): JsonResponse
+    {
+        abort_unless(config('sources.properties') === 'wordpress', 409, 'La administración de solicitudes requiere la fuente de WordPress.');
+
+        try {
+            $result = $this->highlights->completeRequest($highlightRequest, $request->user());
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json(['Datos' => $result]);
+    }
 }

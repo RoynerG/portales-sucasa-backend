@@ -39,6 +39,8 @@ class WordPressHighlightServiceTest extends TestCase
             $table->unsignedBigInteger('fecha_destacado')->nullable();
             $table->string('destacado')->nullable();
             $table->string('marcado_destacado')->nullable();
+            $table->string('oportunidad')->nullable();
+            $table->string('negociable')->nullable();
             $table->string('mercado_libre_destacado')->nullable();
             $table->string('proppit_promocionado')->nullable();
             $table->string('ciencuadras_ascendido')->nullable();
@@ -58,6 +60,8 @@ class WordPressHighlightServiceTest extends TestCase
             $table->string('veces_destacado')->nullable();
             $table->string('oportunidad')->nullable();
             $table->string('negociable')->nullable();
+            $table->unsignedBigInteger('cct_author_id')->nullable();
+            $table->dateTime('cct_created')->nullable();
             $table->string('mercado_libre_destacados')->nullable();
             $table->string('proppit_promocionados')->nullable();
             $table->string('ciencuadras_ascendidos')->nullable();
@@ -73,6 +77,10 @@ class WordPressHighlightServiceTest extends TestCase
             $table->string('portal');
             $table->string('estado');
             $table->string('solicitado_por_id')->nullable();
+            $table->string('solicitado_por_nombre')->nullable();
+            $table->string('razon')->nullable();
+            $table->string('oportunidad')->nullable();
+            $table->string('negociable')->nullable();
             $table->string('completado_por_id')->nullable();
             $table->string('completado_por_nombre')->nullable();
             $table->dateTime('requested_at')->nullable();
@@ -121,7 +129,7 @@ class WordPressHighlightServiceTest extends TestCase
         $this->assertSame(2, $result['pagination']['total']);
         $this->assertSame(2, $result['summary']['active']);
         $this->assertSame(2, $result['summary']['consultants']);
-        $this->assertSame(1, $result['summary']['pending']);
+        $this->assertSame(2, $result['summary']['pending']);
         $this->assertSame(1, $result['summary']['markets']['mercado_libre_destacados']);
         $this->assertSame(1, $result['summary']['markets']['proppit_promocionados']);
 
@@ -168,14 +176,14 @@ class WordPressHighlightServiceTest extends TestCase
         $this->assertSame(12, $result['summary']['limit']);
         $this->assertSame(5, $result['summary']['assigned']);
         $this->assertSame(2, $result['summary']['used']);
-        $this->assertSame(1, $result['summary']['pending']);
+        $this->assertSame(2, $result['summary']['pending']);
         $this->assertSame(1, $result['summary']['overcommitted']);
-        $this->assertSame(3, $result['summary']['available']);
+        $this->assertSame(2, $result['summary']['available']);
 
         $employee = collect($result['items'])->firstWhere('employee_id', '10');
         $this->assertSame(3, $employee['markets']['mercado_libre_destacados']['assigned']);
         $this->assertSame(1, $employee['markets']['mercado_libre_destacados']['used']);
-        $this->assertSame(2, $employee['markets']['mercado_libre_destacados']['available']);
+        $this->assertSame(1, $employee['markets']['mercado_libre_destacados']['available']);
 
         $updated = $service->updateQuotas((string) $employee['id'], ['mercado_libre_destacados' => 4]);
         $this->assertSame(4, $updated['quotas']['mercado_libre_destacados']);
@@ -195,6 +203,29 @@ class WordPressHighlightServiceTest extends TestCase
 
         $this->expectException(\DomainException::class);
         $service->updateQuotaLimits(['mercado_libre_destacados' => 2]);
+    }
+
+    public function test_it_lists_and_completes_a_pending_highlight_request(): void
+    {
+        $service = new WordPressHighlightService;
+        $pending = $service->pendingRequests();
+        $request = collect($pending['items'])->firstWhere('code', '300');
+
+        $this->assertSame(2, $pending['summary']['total']);
+        $this->assertSame('Mercado Libre', $request['market_label']);
+        $this->assertSame('Ana Asesora', $request['requested_by']);
+
+        $actor = new User(['name' => 'Coordinador', 'legacy_employee_id' => '77']);
+        $actor->id = 9;
+        $result = $service->completeRequest($request['id'], $actor);
+
+        $this->assertSame('300', $result['code']);
+        $property = DB::connection('wordpress')->table('wp_jet_cct_inmuebles')->where('codigo', '300')->first();
+        $this->assertSame('Si', $property->destacado);
+        $this->assertSame('Si', $property->mercado_libre_destacado);
+        $this->assertSame('No', $property->marcado_destacado);
+        $this->assertSame('destacado', DB::connection('wordpress')->table('wp_skc_destacado_solicitudes')->where('id', $request['id'])->value('estado'));
+        $this->assertSame('Coordinador', DB::connection('wordpress')->table('wp_skc_destacado_solicitudes')->where('id', $request['id'])->value('completado_por_nombre'));
     }
 
     private function seedHighlights(): void
@@ -247,6 +278,10 @@ class WordPressHighlightServiceTest extends TestCase
                 'portal' => 'mercado_libre_destacados',
                 'estado' => 'destacado',
                 'solicitado_por_id' => '10',
+                'solicitado_por_nombre' => 'Ana Asesora',
+                'razon' => 'Precio',
+                'oportunidad' => 'Si',
+                'negociable' => 'No',
                 'completado_por_id' => '6',
                 'completado_por_nombre' => 'Coordinador',
                 'requested_at' => '2024-07-01 10:00:00',
@@ -257,9 +292,27 @@ class WordPressHighlightServiceTest extends TestCase
                 'portal' => 'finca_raiz_silver',
                 'estado' => 'pendiente',
                 'solicitado_por_id' => '20',
+                'solicitado_por_nombre' => 'Asesor Dos',
+                'razon' => 'Oportunidad',
+                'oportunidad' => 'Si',
+                'negociable' => 'Si',
                 'completado_por_id' => null,
                 'completado_por_nombre' => null,
                 'requested_at' => '2024-07-02 10:00:00',
+                'completed_at' => null,
+            ],
+            [
+                'codigo_inmueble' => '300',
+                'portal' => 'mercado_libre_destacados',
+                'estado' => 'pendiente',
+                'solicitado_por_id' => '10',
+                'solicitado_por_nombre' => 'Ana Asesora',
+                'razon' => 'Ubicación',
+                'oportunidad' => 'Si',
+                'negociable' => 'Si',
+                'completado_por_id' => null,
+                'completado_por_nombre' => null,
+                'requested_at' => '2024-07-03 10:00:00',
                 'completed_at' => null,
             ],
         ]);

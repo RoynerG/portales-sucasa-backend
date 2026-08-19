@@ -279,6 +279,8 @@ backend/
 | DELETE | `/api/properties/{code}` | sí | Soft delete |
 | GET    | `/api/properties/stats` | sí | Stats por estado |
 | GET    | `/api/properties/distribution` | sí | Propiedades por consultor |
+| GET    | `/api/properties/highlights` | sí | Destacados activos, mercados, responsables e historial |
+| DELETE | `/api/properties/{code}/highlight` | sí (administración) | Desarmar el destacado y liberar su cupo |
 | POST   | `/api/properties/{code}/sync/{portal}` | sí | Actualizar sync_status |
 | GET    | `/api/integrations` | sí | Listar portales activos |
 | GET    | `/api/consultants` | sí | Listar consultores |

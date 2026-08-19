@@ -369,12 +369,7 @@ class WordPressHighlightService
                 throw new DomainException("No se encontraron cupos configurados para {$requesterName}.");
             }
             $assigned = max(0, (int) ($quota->{$portal} ?? 0));
-            $used = DB::connection('wordpress')
-                ->table('wp_jet_cct_inmuebles')
-                ->where('id_funcionario', $requesterId)
-                ->where('estado', 'Publico')
-                ->where($market['property_column'], 'Si')
-                ->count();
+            $used = (int) ($this->quotaUsage([$requesterId])[$requesterId][$portal]['used'] ?? 0);
             if ($assigned <= 0 || $used >= $assigned) {
                 throw new DomainException("No hay cupos disponibles de {$market['label']} para {$requesterName}. Asignados: {$assigned}, usados: {$used}.");
             }
@@ -726,16 +721,25 @@ class WordPressHighlightService
         }
 
         foreach (self::MARKETS as $key => $market) {
+            $latestMarketAssignment = DB::connection('wordpress')
+                ->table('wp_jet_cct_inmuebles_destacados')
+                ->where($market['history_column'], 'Si')
+                ->selectRaw('id_inmueble, MAX(_ID) as latest_id')
+                ->groupBy('id_inmueble');
+            $quotaHolder = DB::raw("COALESCE(NULLIF(TRIM(d.id_empleado), ''), NULLIF(TRIM(i.id_funcionario), ''))");
+
             DB::connection('wordpress')
-                ->table('wp_jet_cct_inmuebles')
-                ->whereIn('id_funcionario', $employeeIds)
-                ->where('estado', 'Publico')
-                ->where($market['property_column'], 'Si')
-                ->selectRaw('id_funcionario, COUNT(*) as aggregate')
-                ->groupBy('id_funcionario')
+                ->table('wp_jet_cct_inmuebles as i')
+                ->leftJoinSub($latestMarketAssignment, 'market_assignment', 'market_assignment.id_inmueble', '=', 'i.codigo')
+                ->leftJoin('wp_jet_cct_inmuebles_destacados as d', 'd._ID', '=', 'market_assignment.latest_id')
+                ->whereIn($quotaHolder, $employeeIds)
+                ->where('i.estado', 'Publico')
+                ->where('i.'.$market['property_column'], 'Si')
+                ->selectRaw("COALESCE(NULLIF(TRIM(d.id_empleado), ''), NULLIF(TRIM(i.id_funcionario), '')) as quota_employee_id, COUNT(*) as aggregate")
+                ->groupBy($quotaHolder)
                 ->get()
                 ->each(function (stdClass $row) use (&$usage, $key): void {
-                    $usage[(string) $row->id_funcionario][$key]['used'] = (int) $row->aggregate;
+                    $usage[(string) $row->quota_employee_id][$key]['used'] = (int) $row->aggregate;
                 });
 
             DB::connection('wordpress')

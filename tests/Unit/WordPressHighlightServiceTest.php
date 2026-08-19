@@ -230,6 +230,22 @@ class WordPressHighlightServiceTest extends TestCase
         $service->updateQuotaLimits(['mercado_libre_destacados' => 2]);
     }
 
+    public function test_it_attributes_an_active_quota_to_the_latest_highlight_employee(): void
+    {
+        DB::connection('wordpress')->table('wp_jet_cct_inmuebles')->where('codigo', '100')->update([
+            'id_funcionario' => '20',
+            'funcionario' => 'Asesor Dos',
+        ]);
+
+        $result = (new WordPressHighlightService)->quotas();
+        $employeeTen = collect($result['items'])->firstWhere('employee_id', '10');
+        $employeeTwenty = collect($result['items'])->firstWhere('employee_id', '20');
+
+        $this->assertSame(1, $employeeTen['markets']['mercado_libre_destacados']['used']);
+        $this->assertSame(0, $employeeTwenty['markets']['mercado_libre_destacados']['used']);
+        $this->assertSame(1, $employeeTwenty['markets']['proppit_promocionados']['used']);
+    }
+
     public function test_it_lists_and_completes_a_pending_highlight_request(): void
     {
         $service = new WordPressHighlightService;

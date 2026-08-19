@@ -97,6 +97,17 @@ class WordPressHighlightAdminService
         $items = $rows->map(function (stdClass $row) use ($reportCounts, $postMeta): array {
             $code = (string) (($row->codigo ?? '') ?: $row->_ID);
             $premium = WordPressHighlightService::isAffirmative($row->promocion_premium ?? null);
+            $hasWordPressValue = array_key_exists($code, $postMeta);
+            $wordPressPremium = $hasWordPressValue && WordPressHighlightService::isAffirmative($postMeta[$code]);
+            $premiumSynced = $premium === $wordPressPremium;
+            $syncLabel = $premiumSynced
+                ? 'Sincronizado'
+                : ($premium ? 'Pendiente en WordPress' : 'WordPress aún Premium');
+            $syncHelp = $premiumSynced
+                ? 'El estado Premium del catálogo y WordPress coincide.'
+                : ($premium
+                    ? 'El catálogo indica Premium, pero WordPress todavía no tiene ese estado.'
+                    : 'El catálogo indica Estándar, pero WordPress todavía conserva el estado Premium.');
 
             return [
                 'id' => (int) $row->_ID,
@@ -111,18 +122,31 @@ class WordPressHighlightAdminService
                 'owner' => $row->propietario_nombre,
                 'consultant' => $row->funcionario,
                 'is_premium' => $premium,
-                'premium_synced' => array_key_exists($code, $postMeta) && $premium === WordPressHighlightService::isAffirmative($postMeta[$code]),
+                'premium_synced' => $premiumSynced,
+                'premium_sync_label' => $syncLabel,
+                'premium_sync_help' => $syncHelp,
                 'report_count' => (int) ($reportCounts[$code] ?? 0),
             ];
         })->values()->all();
 
         $available = (clone $base)->count('i._ID');
         $premiumCount = (clone $base)->whereIn(DB::raw("LOWER(TRIM(COALESCE(i.promocion_premium, '')))"), ['si', 'sí', '1', 'true'])->count('i._ID');
+        $publicCount = DB::connection('wordpress')->table('wp_jet_cct_inmuebles')
+            ->where('cct_status', 'publish')
+            ->where('estado', 'Publico')
+            ->count('_ID');
 
         return [
             'items' => $items,
             'pagination' => $this->pagination($page, $pages, $limit, $total),
-            'summary' => ['available' => $available, 'premium' => $premiumCount, 'standard' => max(0, $available - $premiumCount), 'filtered' => $total],
+            'summary' => [
+                'public' => $publicCount,
+                'available' => $available,
+                'ineligible' => max(0, $publicCount - $available),
+                'premium' => $premiumCount,
+                'standard' => max(0, $available - $premiumCount),
+                'filtered' => $total,
+            ],
             'report_types' => self::REPORT_TYPES,
         ];
     }

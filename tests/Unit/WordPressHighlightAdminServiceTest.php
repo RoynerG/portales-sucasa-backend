@@ -117,7 +117,11 @@ class WordPressHighlightAdminServiceTest extends TestCase
 
         $listed = $service->premium();
         $this->assertSame(1, $listed['summary']['available']);
+        $this->assertSame(2, $listed['summary']['public']);
+        $this->assertSame(1, $listed['summary']['ineligible']);
         $this->assertSame('101', $listed['items'][0]['code']);
+        $this->assertTrue($listed['items'][0]['premium_synced']);
+        $this->assertSame('Sincronizado', $listed['items'][0]['premium_sync_label']);
 
         $toggle = $service->togglePremium('101', true, $actor);
         $this->assertTrue($toggle['is_premium']);
@@ -137,5 +141,20 @@ class WordPressHighlightAdminServiceTest extends TestCase
         $actor->id = 9;
         $this->expectException(\DomainException::class);
         (new WordPressHighlightAdminService)->togglePremium('102', true, $actor);
+    }
+
+    public function test_it_only_reports_a_real_premium_difference_as_unsynchronized(): void
+    {
+        DB::connection('wordpress')->table('wp_postmeta')->insert([
+            'post_id' => 101,
+            'meta_key' => 'inmueble-premium',
+            'meta_value' => 'Si',
+        ]);
+
+        $item = (new WordPressHighlightAdminService)->premium()['items'][0];
+
+        $this->assertFalse($item['premium_synced']);
+        $this->assertSame('WordPress aún Premium', $item['premium_sync_label']);
+        $this->assertStringContainsString('catálogo indica Estándar', $item['premium_sync_help']);
     }
 }

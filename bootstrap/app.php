@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\EnsureEmailIsVerified;
+use App\Http\Middleware\EnsureHighlightAdminAccess;
 use App\Http\Middleware\EnsurePortalResetAccess;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
@@ -22,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'verified' => EnsureEmailIsVerified::class,
+            'highlight-admin' => EnsureHighlightAdminAccess::class,
             'portal-reset' => EnsurePortalResetAccess::class,
         ]);
     })

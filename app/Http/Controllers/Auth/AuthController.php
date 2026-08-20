@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\HighlightAdminAccess;
 use App\Services\PortalResetAccess;
 use App\Services\WordPressFuncionarioAuthenticator;
 use Illuminate\Http\JsonResponse;
@@ -16,7 +17,8 @@ class AuthController extends Controller
     public function login(
         Request $request,
         WordPressFuncionarioAuthenticator $funcionarioAuth,
-        PortalResetAccess $portalResetAccess
+        PortalResetAccess $portalResetAccess,
+        HighlightAdminAccess $highlightAdminAccess,
     ): JsonResponse {
         $request->validate([
             'password' => ['required', 'string'],
@@ -65,7 +67,7 @@ class AuthController extends Controller
         return response()->json([
             'Datos' => [
                 'token' => $token,
-                'user' => $this->userPayload($user, $portalResetAccess),
+                'user' => $this->userPayload($user, $portalResetAccess, $highlightAdminAccess),
             ],
         ]);
     }
@@ -77,18 +79,33 @@ class AuthController extends Controller
         return response()->json(['Datos' => 'OK']);
     }
 
-    public function me(Request $request, PortalResetAccess $portalResetAccess): JsonResponse
+    public function me(
+        Request $request,
+        PortalResetAccess $portalResetAccess,
+        HighlightAdminAccess $highlightAdminAccess,
+    ): JsonResponse
     {
         $user = $request->user();
 
         return response()->json([
-            'Datos' => $this->userPayload($user, $portalResetAccess),
+            'Datos' => $this->userPayload($user, $portalResetAccess, $highlightAdminAccess),
         ]);
     }
 
-    private function userPayload(User $user, PortalResetAccess $portalResetAccess): array
+    private function userPayload(
+        User $user,
+        PortalResetAccess $portalResetAccess,
+        HighlightAdminAccess $highlightAdminAccess,
+    ): array
     {
         $cargo = $portalResetAccess->resolveCargo($user);
+        $permissions = [];
+        if ($portalResetAccess->canReset($user, $cargo)) {
+            $permissions[] = 'portal_reset';
+        }
+        if ($highlightAdminAccess->canManage($user, $cargo)) {
+            $permissions[] = 'highlight_admin';
+        }
 
         return [
             'id' => $user->id,
@@ -100,7 +117,7 @@ class AuthController extends Controller
             'legacy_employee_id' => $user->legacy_employee_id,
             'cargo_id' => $cargo['id'],
             'cargo' => $cargo['label'],
-            'permissions' => $portalResetAccess->canReset($user, $cargo) ? ['portal_reset'] : [],
+            'permissions' => $permissions,
         ];
     }
 }

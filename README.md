@@ -333,3 +333,12 @@ La configuración, prueba en QA y promoción segura de Fincaraíz están documen
 - [ ] Configurar GitHub Actions para CI.
 - [ ] Desplegar en hosting (compartir `FRONTEND_URL` con el panel desplegado).
 - [ ] Importar datos reales desde la BD legacy de `vieja/` (script en `app/Console/Commands/ImportLegacyData.php`, pendiente).
+
+# Permisos de administración de destacados
+
+Los permisos administrativos de destacados están separados del reinicio de portales:
+
+- `highlight_admin`: permite confirmar solicitudes, liberar destacados, administrar cupos y límites, historial consolidado y Premium. Por defecto corresponde a los cargos `1,6,11,12,13,14` de `wp_jet_cct_funcionarios`.
+- `portal_reset`: conserva acceso exclusivo a Gerencias y Desarrollo (`11,12,13,14`) para reiniciar historial y configuración sensible de portales.
+
+Los cargos de destacados pueden personalizarse con `HIGHLIGHT_ADMIN_ALLOWED_CARGO_IDS` y `HIGHLIGHT_ADMIN_ALLOWED_ROLE_KEYWORDS`. Normalmente basta con actualizar `id_cargo` en el funcionario de JetEngine; el panel vuelve a resolverlo al cargar la sesión.

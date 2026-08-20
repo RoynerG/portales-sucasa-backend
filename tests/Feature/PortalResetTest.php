@@ -2,11 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Http\Middleware\EnsureHighlightAdminAccess;
 use App\Models\User;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Http\Request;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -18,6 +20,8 @@ class PortalResetTest extends TestCase
 
         config()->set('portal_reset.allowed_cargo_ids', [11, 12, 13, 14]);
         config()->set('portal_reset.allowed_role_keywords', ['gerencia', 'desarrollo']);
+        config()->set('highlight_admin.allowed_cargo_ids', [1, 6, 11, 12, 13, 14]);
+        config()->set('highlight_admin.allowed_role_keywords', ['gerencia', 'desarrollo']);
         config()->set('portal_reset.confirmation_phrase', 'REINICIAR PORTALES');
         Storage::fake('local');
         $this->createTables();
@@ -51,6 +55,28 @@ class PortalResetTest extends TestCase
             $this->getJson('/api/portals/settings/reset-preview')
                 ->assertOk();
         }
+    }
+
+    public function test_commercial_highlight_admin_does_not_receive_portal_reset_access(): void
+    {
+        $user = $this->userWithCargo(6);
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJsonPath('Datos.permissions', ['highlight_admin']);
+
+        $this->getJson('/api/portals/settings/reset-preview')
+            ->assertForbidden();
+
+        $request = Request::create('/api/properties/highlight-history');
+        $request->setUserResolver(fn (): User => $user);
+        $response = app(EnsureHighlightAdminAccess::class)->handle(
+            $request,
+            fn (Request $request) => response()->json(['authorized' => true]),
+        );
+
+        $this->assertSame(200, $response->getStatusCode());
     }
 
     public function test_a_future_management_cargo_is_allowed_by_its_role(): void

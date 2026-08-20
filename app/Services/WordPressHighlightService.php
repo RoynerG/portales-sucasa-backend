@@ -88,9 +88,13 @@ class WordPressHighlightService
         ];
     }
 
-    public function release(string $code, User $actor): array
+    public function release(string $code, User $actor, ?string $portal = null): array
     {
-        return DB::connection('wordpress')->transaction(function () use ($code, $actor): array {
+        if ($portal !== null && ! isset(self::MARKETS[$portal])) {
+            throw new OutOfBoundsException('El mercado de destacado indicado no es válido.');
+        }
+
+        return DB::connection('wordpress')->transaction(function () use ($code, $actor, $portal): array {
             $property = DB::connection('wordpress')
                 ->table('wp_jet_cct_inmuebles')
                 ->where(function (Builder $query) use ($code): void {
@@ -111,13 +115,25 @@ class WordPressHighlightService
                 throw new OutOfBoundsException('El inmueble ya no tiene un destacado activo.');
             }
 
+            $releasedMarkets = $markets;
+            if ($portal !== null) {
+                $releasedMarkets = collect($markets)->where('key', $portal)->values()->all();
+                if ($releasedMarkets === []) {
+                    throw new OutOfBoundsException('El inmueble ya no tiene activo ese mercado de destacado.');
+                }
+            }
+
+            $releasedKeys = collect($releasedMarkets)->pluck('key')->all();
+            $remainingMarkets = collect($markets)->reject(fn (array $market): bool => in_array($market['key'], $releasedKeys, true))->values()->all();
+            $propertyCode = (string) (($property->codigo ?? '') ?: $property->_ID);
+            $hasPending = $this->hasPendingMarketRequest($propertyCode, $releasedKeys);
             $updates = [
-                'destacado' => 'No',
-                'marcado_destacado' => 'No',
-                'fecha_destacado' => null,
+                'destacado' => $remainingMarkets === [] ? 'No' : 'Si',
+                'marcado_destacado' => $hasPending ? 'Si' : 'No',
+                'fecha_destacado' => ($remainingMarkets !== [] || $hasPending) ? ($property->fecha_destacado ?? time()) : null,
             ];
-            foreach (self::MARKETS as $market) {
-                $updates[$market['property_column']] = 'No';
+            foreach ($releasedMarkets as $releasedMarket) {
+                $updates[self::MARKETS[$releasedMarket['key']]['property_column']] = 'No';
             }
 
             DB::connection('wordpress')
@@ -128,19 +144,20 @@ class WordPressHighlightService
             $employeeId = (string) ($actor->legacy_employee_id ?: $actor->id);
             DB::connection('wordpress')->table('wp_jet_cct_historial_del_inmueble')->insert([
                 'fecha' => time(),
-                'id_inmueble' => (string) (($property->codigo ?? '') ?: $property->_ID),
+                'id_inmueble' => $propertyCode,
                 'id_empleado' => $employeeId,
                 'funcionario' => $actor->name ?: 'Funcionario',
                 'tipo_reporte' => 'Destacado',
-                'observacion' => 'Se liberó el cupo de destacado desde el panel de portales. Mercados desactivados: '.collect($markets)->pluck('label')->join(', ').'. No se eliminó el historial ni se ejecutaron acciones en los portales externos.',
+                'observacion' => 'Se liberó el cupo de destacado desde el panel de portales. Mercados desactivados: '.collect($releasedMarkets)->pluck('label')->join(', ').'. Los demás mercados permanecen activos. No se eliminó el historial ni se ejecutaron acciones en los portales externos.',
                 'cct_author_id' => (int) $employeeId,
                 'cct_created' => now(),
                 'cct_modified' => now(),
             ]);
 
             return [
-                'code' => (string) (($property->codigo ?? '') ?: $property->_ID),
-                'released_markets' => $markets,
+                'code' => $propertyCode,
+                'released_markets' => $releasedMarkets,
+                'remaining_markets' => $remainingMarkets,
                 'message' => 'Cupo liberado correctamente. El historial se conservó.',
             ];
         });
@@ -247,20 +264,21 @@ class WordPressHighlightService
             if (! $property || (string) ($property->estado ?? '') !== 'Publico') {
                 throw new DomainException('Solo se puede solicitar destacado para un inmueble público.');
             }
-            if (self::marketsFor($property) !== [] || self::isAffirmative($property->destacado ?? null)) {
-                throw new DomainException('El inmueble ya tiene un destacado activo. Libera primero el cupo actual.');
+            $market = self::MARKETS[$portal];
+            if (self::isAffirmative($property->{$market['property_column']} ?? null)) {
+                throw new DomainException("El inmueble ya tiene activo el destacado de {$market['label']}.");
             }
 
             $propertyCode = trim((string) (($property->codigo ?? '') ?: $property->_ID));
             $pendingRequest = DB::connection('wordpress')
                 ->table('wp_skc_destacado_solicitudes')
                 ->where('codigo_inmueble', $propertyCode)
+                ->where('portal', $portal)
                 ->where('estado', 'pendiente')
                 ->lockForUpdate()
                 ->first();
             if ($pendingRequest) {
-                $pendingMarket = self::MARKETS[$pendingRequest->portal]['label'] ?? (string) $pendingRequest->portal;
-                throw new DomainException("El inmueble ya tiene una solicitud pendiente en {$pendingMarket}.");
+                throw new DomainException("El inmueble ya tiene una solicitud pendiente en {$market['label']}.");
             }
 
             $employee = DB::connection('wordpress')
@@ -277,7 +295,6 @@ class WordPressHighlightService
                 throw new DomainException('No se encontraron cupos configurados para tu funcionario.');
             }
 
-            $market = self::MARKETS[$portal];
             $assigned = max(0, (int) ($employee->{$portal} ?? 0));
             $usage = $this->quotaUsage([$employeeId])[$employeeId][$portal] ?? ['used' => 0, 'pending' => 0];
             $used = (int) ($usage['used'] ?? 0);
@@ -516,13 +533,8 @@ class WordPressHighlightService
                 'oportunidad' => (string) ($request->oportunidad ?? ''),
                 'negociable' => (string) ($request->negociable ?? ''),
                 'destacado' => 'Si',
-                'marcado_destacado' => 'No',
             ];
-            foreach (self::MARKETS as $marketInfo) {
-                $propertyUpdates[$marketInfo['property_column']] = 'No';
-            }
             $propertyUpdates[$market['property_column']] = 'Si';
-            DB::connection('wordpress')->table('wp_jet_cct_inmuebles')->where('_ID', $property->_ID)->update($propertyUpdates);
 
             $history = [
                 'fecha' => $now,
@@ -560,6 +572,9 @@ class WordPressHighlightService
                 'completado_por_nombre' => $actor->name ?: 'Funcionario',
                 'completed_at' => now(),
             ]);
+
+            $propertyUpdates['marcado_destacado'] = $this->hasPendingMarketRequest($propertyCode) ? 'Si' : 'No';
+            DB::connection('wordpress')->table('wp_jet_cct_inmuebles')->where('_ID', $property->_ID)->update($propertyUpdates);
 
             $notificationContext = [$property, $request, $market['label']];
 
@@ -703,6 +718,7 @@ class WordPressHighlightService
     private function summary(): array
     {
         $active = $this->activePropertiesQuery();
+        $capacity = $this->quotaSummary();
         $markets = [];
         foreach (self::MARKETS as $key => $market) {
             $markets[$key] = (clone $active)->where('i.'.$market['property_column'], 'Si')->count();
@@ -710,11 +726,28 @@ class WordPressHighlightService
 
         return [
             'active' => (clone $active)->count(),
+            'active_assignments' => (int) $capacity['used'],
+            'assigned' => (int) $capacity['assigned'],
+            'remaining' => max(0, (int) $capacity['assigned'] - (int) $capacity['used']),
+            'available' => (int) $capacity['available'],
+            'overcommitted' => (int) $capacity['overcommitted'],
             'consultants' => (clone $active)->whereNotNull('i.id_funcionario')->distinct()->count('i.id_funcionario'),
-            'pending' => $this->pendingCount(),
+            'pending' => (int) $capacity['pending'],
             'history' => DB::connection('wordpress')->table('wp_jet_cct_inmuebles_destacados')->count(),
             'markets' => $markets,
         ];
+    }
+
+    private function hasPendingMarketRequest(string $propertyCode, array $ignoredMarkets = []): bool
+    {
+        $requests = DB::connection('wordpress')
+            ->table('wp_skc_destacado_solicitudes')
+            ->where('codigo_inmueble', $propertyCode)
+            ->where('estado', 'pendiente')
+            ->pluck('portal');
+
+        return $requests->contains(fn ($market): bool => isset(self::MARKETS[(string) $market])
+            && ! in_array((string) $market, $ignoredMarkets, true));
     }
 
     private function pendingCount(): int

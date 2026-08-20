@@ -7,6 +7,7 @@ use App\Models\PropertySyncStatus;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use stdClass;
 
 class WordPressPropertyRepository
@@ -30,8 +31,14 @@ class WordPressPropertyRepository
         $rows = $query->forPage($page, $limit)->get();
         $imageUrls = $this->attachmentUrls($rows);
         $syncStatuses = $this->syncStatuses($rows);
+        $pendingHighlights = $this->pendingHighlightMarkets($rows);
 
-        return $rows->map(fn (stdClass $row) => $this->mapProperty($row, $imageUrls, syncStatuses: $syncStatuses));
+        return $rows->map(fn (stdClass $row) => $this->mapProperty(
+            $row,
+            $imageUrls,
+            syncStatuses: $syncStatuses,
+            pendingHighlights: $pendingHighlights,
+        ));
     }
 
     public function findByCode(string $code): ?array
@@ -46,7 +53,13 @@ class WordPressPropertyRepository
 
         $rows = collect([$row]);
 
-        return $this->mapProperty($row, $this->attachmentUrls($rows), withDetail: true, syncStatuses: $this->syncStatuses($rows));
+        return $this->mapProperty(
+            $row,
+            $this->attachmentUrls($rows),
+            withDetail: true,
+            syncStatuses: $this->syncStatuses($rows),
+            pendingHighlights: $this->pendingHighlightMarkets($rows),
+        );
     }
 
     public function activeCodes(): Collection
@@ -476,7 +489,13 @@ class WordPressPropertyRepository
         $query->orderBy($column, $direction);
     }
 
-    protected function mapProperty(stdClass $row, array $imageUrls, bool $withDetail = false, array $syncStatuses = []): array
+    protected function mapProperty(
+        stdClass $row,
+        array $imageUrls,
+        bool $withDetail = false,
+        array $syncStatuses = [],
+        array $pendingHighlights = [],
+    ): array
     {
         $images = $this->imageIds($row)
             ->map(fn (int $id, int $index) => [
@@ -498,6 +517,11 @@ class WordPressPropertyRepository
 
         $displayPrice = $this->money($row->precio_arriendo) ?: $this->money($row->precio_venta);
         $highlightMarkets = WordPressHighlightService::marketsFor($row);
+        $activeMarketKeys = collect($highlightMarkets)->pluck('key');
+        $pendingHighlightMarkets = collect($pendingHighlights[(string) $row->codigo] ?? [])
+            ->reject(fn (array $market): bool => $activeMarketKeys->contains($market['key']))
+            ->values()
+            ->all();
 
         return [
             'id' => (int) $row->_ID,
@@ -534,8 +558,9 @@ class WordPressPropertyRepository
             'legacy_status' => $row->estado,
             'featured' => $this->yesNo($row->destacado) || $this->yesNo($row->marcado_destacado),
             'highlighted' => $highlightMarkets !== [] || $this->yesNo($row->destacado ?? null),
-            'highlight_pending' => $highlightMarkets === [] && $this->yesNo($row->marcado_destacado ?? null),
+            'highlight_pending' => $pendingHighlightMarkets !== [],
             'highlight_markets' => $highlightMarkets,
+            'highlight_pending_markets' => $pendingHighlightMarkets,
             'highlighted_at' => $this->timestamp($row->fecha_destacado ?? null),
             'published_at' => $this->timestamp($row->fecha_publicacion),
             'consultant' => $row->funcionario,
@@ -564,6 +589,35 @@ class WordPressPropertyRepository
             ->table('wp_posts')
             ->whereIn('ID', $ids)
             ->pluck('guid', 'ID')
+            ->all();
+    }
+
+    protected function pendingHighlightMarkets(Collection $rows): array
+    {
+        if (! Schema::connection('wordpress')->hasTable('wp_skc_destacado_solicitudes')) {
+            return [];
+        }
+
+        $codes = $rows->pluck('codigo')->map(fn ($code): string => trim((string) $code))->filter()->unique()->values();
+        if ($codes->isEmpty()) {
+            return [];
+        }
+
+        return DB::connection('wordpress')
+            ->table('wp_skc_destacado_solicitudes')
+            ->whereIn('codigo_inmueble', $codes->all())
+            ->where('estado', 'pendiente')
+            ->get(['codigo_inmueble', 'portal'])
+            ->filter(fn (stdClass $request): bool => isset(WordPressHighlightService::MARKETS[(string) $request->portal]))
+            ->groupBy(fn (stdClass $request): string => (string) $request->codigo_inmueble)
+            ->map(fn (Collection $requests): array => $requests
+                ->unique('portal')
+                ->map(fn (stdClass $request): array => [
+                    'key' => (string) $request->portal,
+                    'label' => WordPressHighlightService::MARKETS[(string) $request->portal]['label'],
+                ])
+                ->values()
+                ->all())
             ->all();
     }
 

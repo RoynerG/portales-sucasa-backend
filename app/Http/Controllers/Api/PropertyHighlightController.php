@@ -29,7 +29,11 @@ class PropertyHighlightController extends Controller
         abort_unless(config('sources.properties') === 'wordpress', 409, 'La administración de destacados requiere la fuente de WordPress.');
 
         try {
-            $result = $this->highlights->release(trim($code), $request->user());
+            $result = $this->highlights->release(
+                trim($code),
+                $request->user(),
+                trim((string) $request->query('mercado', '')) ?: null,
+            );
         } catch (OutOfBoundsException $exception) {
             return response()->json(['message' => $exception->getMessage()], 422);
         }

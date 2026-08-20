@@ -153,6 +153,10 @@ class WordPressHighlightServiceTest extends TestCase
 
         $this->assertSame(2, $result['pagination']['total']);
         $this->assertSame(2, $result['summary']['active']);
+        $this->assertSame(2, $result['summary']['active_assignments']);
+        $this->assertSame(5, $result['summary']['assigned']);
+        $this->assertSame(3, $result['summary']['remaining']);
+        $this->assertSame(2, $result['summary']['available']);
         $this->assertSame(2, $result['summary']['consultants']);
         $this->assertSame(2, $result['summary']['pending']);
         $this->assertSame(1, $result['summary']['markets']['mercado_libre_destacados']);
@@ -311,6 +315,34 @@ class WordPressHighlightServiceTest extends TestCase
         $this->expectExceptionMessage('No tienes cupos disponibles de Mercado Libre');
 
         (new WordPressHighlightService)->requestHighlight('300', 'mercado_libre_destacados', 'Precio', true, false, $actor);
+    }
+
+    public function test_a_property_can_use_and_release_independent_market_quotas(): void
+    {
+        DB::connection('wordpress')->table('wp_jet_cct_funcionarios')->where('id_empleado', '10')->update([
+            'proppit_promocionados' => 1,
+        ]);
+        $actor = new User(['name' => 'Administradora', 'legacy_employee_id' => '10']);
+        $actor->id = 99;
+        $service = new WordPressHighlightService;
+
+        $request = $service->requestHighlight('100', 'proppit_promocionados', 'Segundo portal', true, true, $actor);
+        $service->completeRequest($request['request_id'], $actor);
+
+        $property = DB::connection('wordpress')->table('wp_jet_cct_inmuebles')->where('codigo', '100')->first();
+        $this->assertSame('Si', $property->mercado_libre_destacado);
+        $this->assertSame('Si', $property->proppit_promocionado);
+        $this->assertSame('Si', $property->destacado);
+        $this->assertSame('No', $property->marcado_destacado);
+
+        $released = $service->release('100', $actor, 'proppit_promocionados');
+        $property = DB::connection('wordpress')->table('wp_jet_cct_inmuebles')->where('codigo', '100')->first();
+
+        $this->assertSame(['proppit_promocionados'], array_column($released['released_markets'], 'key'));
+        $this->assertSame(['mercado_libre_destacados'], array_column($released['remaining_markets'], 'key'));
+        $this->assertSame('Si', $property->mercado_libre_destacado);
+        $this->assertSame('No', $property->proppit_promocionado);
+        $this->assertSame('Si', $property->destacado);
     }
 
     public function test_it_queues_owner_and_employee_emails_after_confirming_a_highlight(): void

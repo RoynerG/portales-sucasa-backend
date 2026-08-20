@@ -383,6 +383,7 @@ class WordPressPropertyRepository
         }
 
         $this->applyHighlightFilter($query, trim((string) ($filters['destacado'] ?? '')));
+        $this->applyHighlightMarketFilter($query, trim((string) ($filters['mercado_destacado'] ?? '')));
 
         $portal = trim((string) ($filters['portal'] ?? ''));
         $portalState = trim((string) ($filters['estado_portal'] ?? ''));
@@ -463,6 +464,25 @@ class WordPressPropertyRepository
         }
 
         $query->whereNotIn($normalized('marcado_destacado'), $affirmative);
+    }
+
+    protected function applyHighlightMarketFilter(Builder $query, string $market): void
+    {
+        if ($market === '') {
+            return;
+        }
+
+        if (! isset(WordPressHighlightService::MARKETS[$market])) {
+            $query->whereRaw('1 = 0');
+
+            return;
+        }
+
+        $column = WordPressHighlightService::MARKETS[$market]['property_column'];
+        $query->whereIn(
+            DB::raw("LOWER(TRIM(COALESCE({$column}, '')))"),
+            ['1', 'si', 'sí', 'yes', 'true', 'activo', 'activa', 'destacado', 'promocionado'],
+        );
     }
 
     protected function selectedPortal(mixed $portal): ?string
